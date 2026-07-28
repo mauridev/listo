@@ -30,6 +30,7 @@ export async function middleware(request: NextRequest) {
 
   const isAuthRoute = request.nextUrl.pathname.startsWith('/login') ||
                       request.nextUrl.pathname.startsWith('/registro')
+  const isCallbackRoute = request.nextUrl.pathname.startsWith('/auth/callback')
   const isParentRoute = request.nextUrl.pathname.startsWith('/dashboard') ||
                         request.nextUrl.pathname.startsWith('/hijos')
   const isKidRoute = request.nextUrl.pathname.startsWith('/c/')
@@ -42,8 +43,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/dashboard', request.url))
   }
 
-  // Kid routes are open (PIN-based, no auth)
-  if (isKidRoute) return supabaseResponse
+  // Open routes
+  if (isKidRoute || isCallbackRoute) return supabaseResponse
 
   return supabaseResponse
 }

@@ -23,27 +23,24 @@ export default function RegistroPage() {
     setLoading(true)
     const supabase = createClient()
 
-    const { data: { user }, error: signUpError } = await supabase.auth.signUp({ email, password })
+    const { data: { user }, error: signUpError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
+      },
+    })
     if (signUpError || !user) {
       setError(signUpError?.message ?? 'Error al crear la cuenta')
       setLoading(false)
       return
     }
 
-    // Create family with unique PIN
-    let pin = generatePin()
-    let attempts = 0
-    while (attempts < 5) {
-      const { error: familyError } = await supabase
-        .from('families')
-        .insert({ parent_id: user.id, family_pin: pin })
-      if (!familyError) break
-      pin = generatePin()
-      attempts++
-    }
-
-    router.push('/dashboard')
-    router.refresh()
+    // Family row is created in /auth/callback after email confirmation
+    // Show confirmation message instead of redirecting
+    setError('')
+    setLoading(false)
+    alert('¡Cuenta creada! Revisá tu email y hacé click en el link de confirmación para entrar.')
   }
 
   return (
