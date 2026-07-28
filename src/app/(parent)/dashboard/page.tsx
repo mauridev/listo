@@ -78,7 +78,9 @@ export default async function DashboardPage() {
         </div>
         <div className="text-right">
           <p className="text-xs" style={{ color: 'var(--t2)' }}>Tus hijos entran en</p>
-          <p className="text-xs font-medium" style={{ color: 'var(--t3)' }}>listo.app/c/{family.family_pin.toLowerCase()}</p>
+          <p className="text-xs font-medium" style={{ color: 'var(--t3)' }}>
+            {(process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL || 'listo-lemon-ten.vercel.app')}/c/{family.family_pin.toLowerCase()}
+          </p>
         </div>
       </div>
 
