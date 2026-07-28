@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 
-type KidChild = { id: string; name: string; avatar_color: string }
+type KidChild = { id: string; name: string; avatar_color: string; reward_text: string | null }
 
 export function ChildSelector({
   familyId,

@@ -29,12 +29,15 @@ type Child = {
   id: string
   name: string
   avatar_color: string
+  reward_text: string | null
   tasks: Task[]
 }
 
 export function TaskManager({ child }: { child: Child }) {
   const router = useRouter()
   const [tasks, setTasks] = useState<Task[]>(child.tasks)
+  const [reward, setReward] = useState(child.reward_text ?? '')
+  const [savingReward, setSavingReward] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const [newRecurrence, setNewRecurrence] = useState<'daily' | 'weekdays' | 'weekend' | 'custom'>('daily')
   const [newDays, setNewDays] = useState<number[]>([])
@@ -43,6 +46,13 @@ export function TaskManager({ child }: { child: Child }) {
 
   const activeTasks = tasks.filter(t => t.active)
   const completed = activeTasks.filter(t => t.completed_today).length
+
+  async function saveReward() {
+    setSavingReward(true)
+    const supabase = createClient()
+    await supabase.from('children').update({ reward_text: reward.trim() || null }).eq('id', child.id)
+    setSavingReward(false)
+  }
 
   async function addTask(e: React.FormEvent) {
     e.preventDefault()
@@ -102,6 +112,31 @@ export function TaskManager({ child }: { child: Child }) {
           />
         </div>
       )}
+
+      {/* Reward */}
+      <div className="rounded-xl p-4 mb-6" style={{ background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.2)' }}>
+        <p className="text-xs font-semibold uppercase tracking-widest mb-2" style={{ color: 'var(--ac)' }}>🎁 Recompensa de esta semana</p>
+        <div className="flex gap-2">
+          <input
+            value={reward}
+            onChange={e => setReward(e.target.value)}
+            onBlur={saveReward}
+            onKeyDown={e => e.key === 'Enter' && saveReward()}
+            className="flex-1 rounded-lg px-3 py-2 text-sm outline-none"
+            style={{ background: 'var(--surf)', border: '1px solid var(--bdr2)', color: 'var(--t1)' }}
+            placeholder="Ej: elegís la película del viernes…"
+          />
+          <button
+            onClick={saveReward}
+            disabled={savingReward}
+            className="px-3 py-2 rounded-lg text-xs font-semibold disabled:opacity-40"
+            style={{ background: 'var(--ac)', color: '#fff' }}
+          >
+            {savingReward ? '…' : 'Guardar'}
+          </button>
+        </div>
+        <p className="text-xs mt-2" style={{ color: 'var(--t3)' }}>El hijo la ve al iniciar el check-in como motivación</p>
+      </div>
 
       {/* Tasks */}
       <div className="space-y-2 mb-6">

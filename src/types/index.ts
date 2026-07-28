@@ -10,6 +10,7 @@ export type Child = {
   family_id: string
   name: string
   avatar_color: string
+  reward_text: string | null
   created_at: string
 }
 

@@ -19,6 +19,7 @@ export default async function PinPage({ params }: { params: Promise<{ pin: strin
     id: row.child_id,
     name: row.child_name,
     avatar_color: row.avatar_color,
+    reward_text: row.reward_text ?? null,
   }))
 
   return <ChildSelector familyId={familyId} children={children} pin={pin.toUpperCase()} />

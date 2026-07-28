@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type KidChild = { id: string; name: string; avatar_color: string; familyId: string; pin: string }
+type KidChild = { id: string; name: string; avatar_color: string; familyId: string; pin: string; reward_text: string | null }
 type Task = { id: string; title: string; recurrence: string; days: number[] | null; completed_today: boolean }
 
 function taskAppliesToday(task: { recurrence: string; days: number[] | null }): boolean {
@@ -293,6 +293,13 @@ export function CheckinExperience() {
               Vamos a repasar tus tareas antes del tiempo libre
             </p>
           </div>
+
+          {child.reward_text && (
+            <div className="w-full p-4 rounded-2xl text-left" style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.25)' }}>
+              <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: 'var(--ac)' }}>🎁 Recompensa de esta semana</p>
+              <p className="text-sm font-medium" style={{ color: 'var(--t1)' }}>{child.reward_text}</p>
+            </div>
+          )}
 
           <div className="w-full p-4 rounded-2xl text-left" style={{ background: 'var(--surf)', border: '1px solid var(--bdr)' }}>
             <p className="text-xs font-semibold uppercase tracking-widest mb-2" style={{ color: 'var(--t3)' }}>Tareas de hoy</p>

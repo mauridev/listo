@@ -17,6 +17,7 @@ CREATE TABLE children (
   family_id    uuid REFERENCES families(id) ON DELETE CASCADE NOT NULL,
   name         text NOT NULL,
   avatar_color text NOT NULL DEFAULT '#7C3AED',
+  reward_text  text DEFAULT NULL,
   created_at   timestamptz DEFAULT now()
 );
 
@@ -95,7 +96,8 @@ RETURNS TABLE(
   family_pin   varchar,
   child_id     uuid,
   child_name   text,
-  avatar_color text
+  avatar_color text,
+  reward_text  text
 )
 LANGUAGE sql SECURITY DEFINER AS $$
   SELECT
@@ -103,7 +105,8 @@ LANGUAGE sql SECURITY DEFINER AS $$
     f.family_pin,
     c.id    AS child_id,
     c.name  AS child_name,
-    c.avatar_color
+    c.avatar_color,
+    c.reward_text
   FROM families f
   JOIN children c ON c.family_id = f.id
   WHERE f.family_pin = UPPER(pin);
