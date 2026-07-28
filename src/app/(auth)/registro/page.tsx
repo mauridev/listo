@@ -23,7 +23,7 @@ export default function RegistroPage() {
     setLoading(true)
     const supabase = createClient()
 
-    const { data: { user }, error: signUpError } = await supabase.auth.signUp({
+    const { data: { user, session }, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -36,11 +36,23 @@ export default function RegistroPage() {
       return
     }
 
-    // Family row is created in /auth/callback after email confirmation
-    // Show confirmation message instead of redirecting
-    setError('')
-    setLoading(false)
-    alert('¡Cuenta creada! Revisá tu email y hacé click en el link de confirmación para entrar.')
+    if (session) {
+      // Email confirmation disabled — session is immediately active, create family now
+      let pin = generatePin()
+      for (let i = 0; i < 5; i++) {
+        const { error: familyError } = await supabase
+          .from('families')
+          .insert({ parent_id: user.id, family_pin: pin })
+        if (!familyError) break
+        pin = generatePin()
+      }
+      router.push('/dashboard')
+      router.refresh()
+    } else {
+      // Email confirmation enabled — family is created in /auth/callback
+      setLoading(false)
+      setError('¡Cuenta creada! Revisá tu email y hacé click en el link de confirmación para entrar.')
+    }
   }
 
   return (
