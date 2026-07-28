@@ -1,23 +1,24 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
 type KidChild = { id: string; name: string; avatar_color: string; familyId: string; pin: string; reward_text: string | null }
-type Task = { id: string; title: string; recurrence: string; days: number[] | null; completed_today: boolean }
+type Task = { id: string; title: string; recurrence: string; days: number[] | null; points: number; completed_today: boolean }
+type CatalogItem = { id: string; title: string; cost_points: number }
+type Screen = 'welcome' | 'checkin' | 'done' | 'pending' | 'store'
 
 function taskAppliesToday(task: { recurrence: string; days: number[] | null }): boolean {
-  const day = new Date().getDay() // 0=Dom, 1=Lun, ..., 6=Sáb
+  const day = new Date().getDay()
   if (task.recurrence === 'daily') return true
   if (task.recurrence === 'weekdays') return day >= 1 && day <= 5
   if (task.recurrence === 'weekend') return day === 0 || day === 6
   if (task.recurrence === 'custom') return task.days?.includes(day) ?? false
   return true
 }
-type Screen = 'welcome' | 'checkin' | 'done' | 'pending'
 
 // ── Orb Canvas Component ───────────────────────────────────────────────────
 
@@ -56,7 +57,6 @@ function OrbCanvas({ size, speaking, color }: { size: number; speaking: boolean;
       ctx.closePath()
       const pulse = (Math.sin(t * 0.55) + 1) / 2
       const g = ctx.createRadialGradient(cx - r * 0.2, cy - r * 0.26, 0, cx, cy, r * 1.15)
-      // Parse the accent color and create gradient
       g.addColorStop(0, `rgba(180,140,255,${0.8 + pulse * 0.2})`)
       g.addColorStop(0.42, color)
       g.addColorStop(0.78, '#4C1D95')
@@ -65,7 +65,6 @@ function OrbCanvas({ size, speaking, color }: { size: number; speaking: boolean;
       const h = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.36, 0, cx, cy, r * 0.72)
       h.addColorStop(0, 'rgba(255,255,255,0.28)'); h.addColorStop(1, 'rgba(255,255,255,0)')
       ctx.fillStyle = h; ctx.fill()
-      // Glow
       const gl = ctx.createRadialGradient(cx, cy, r * 0.92, cx, cy, r * 1.6)
       gl.addColorStop(0, `rgba(124,58,237,${speaking ? 0.12 + pulse * 0.1 : 0.05 + pulse * 0.04})`)
       gl.addColorStop(1, 'rgba(124,58,237,0)')
@@ -118,6 +117,8 @@ export function CheckinExperience() {
   const router = useRouter()
   const [child, setChild] = useState<KidChild | null>(null)
   const [tasks, setTasks] = useState<Task[]>([])
+  const [balance, setBalance] = useState(0)
+  const [catalog, setCatalog] = useState<CatalogItem[]>([])
   const [screen, setScreen] = useState<Screen>('welcome')
   const [taskIndex, setTaskIndex] = useState(0)
   const [speaking, setSpeaking] = useState(false)
@@ -127,40 +128,44 @@ export function CheckinExperience() {
   const [answer, setAnswer] = useState('')
   const [pendingTasks, setPendingTasks] = useState<Task[]>([])
   const [completedTasks, setCompletedTasks] = useState<Task[]>([])
+  const [requesting, setRequesting] = useState<string | null>(null)
+  const [requestedIds, setRequestedIds] = useState<Set<string>>(new Set())
 
-  // Load child from sessionStorage
   useEffect(() => {
     const stored = sessionStorage.getItem('listo_child')
     if (!stored) { router.push('/'); return }
     const c: KidChild = JSON.parse(stored)
     setChild(c)
 
-    // Fetch today's tasks
-    async function fetchTasks() {
+    async function fetchAll() {
       const supabase = createClient()
       const today = new Date().toISOString().split('T')[0]
-      const { data } = await supabase
-        .from('tasks')
-        .select(`*, task_completions(id, date)`)
-        .eq('child_id', c.id)
-        .eq('active', true)
-      if (data) {
-        const todayTasks = data
+
+      const [{ data: tasksData }, { data: balanceData }, { data: catalogData }] = await Promise.all([
+        supabase.from('tasks').select(`*, task_completions(id, date)`).eq('child_id', c.id).eq('active', true),
+        supabase.rpc('get_child_balance', { p_child_id: c.id }),
+        supabase.from('rewards_catalog').select('id, title, cost_points').eq('child_id', c.id).eq('active', true).order('cost_points'),
+      ])
+
+      if (tasksData) {
+        const todayTasks = tasksData
           .filter(t => taskAppliesToday(t))
           .map(t => ({
             id: t.id,
             title: t.title,
             recurrence: t.recurrence,
             days: t.days ?? null,
+            points: t.points ?? 10,
             completed_today: t.task_completions?.some((tc: any) => tc.date === today) ?? false,
           }))
         setTasks(todayTasks)
       }
+      setBalance(balanceData ?? 0)
+      setCatalog(catalogData ?? [])
     }
-    fetchTasks()
+    fetchAll()
   }, [router])
 
-  // Welcome speech on mount
   useEffect(() => {
     if (!child || tasks.length === 0 || screen !== 'welcome') return
     setSpeaking(true)
@@ -232,11 +237,18 @@ export function CheckinExperience() {
 
     if (didComplete) {
       const supabase = createClient()
+      const today = new Date().toISOString().split('T')[0]
       await supabase.from('task_completions').upsert({
         task_id: task.id,
         child_id: child!.id,
-        date: new Date().toISOString().split('T')[0],
+        date: today,
       }, { onConflict: 'task_id,date' })
+      await supabase.from('point_transactions').insert({
+        child_id: child!.id,
+        delta: task.points,
+        reason: task.title,
+      })
+      setBalance(prev => prev + task.points)
       newCompleted = [...completed, task]
       setCompletedTasks(newCompleted)
     } else {
@@ -261,10 +273,22 @@ export function CheckinExperience() {
     }
   }
 
+  async function requestReward(item: CatalogItem) {
+    if (requesting || requestedIds.has(item.id)) return
+    setRequesting(item.id)
+    const supabase = createClient()
+    await supabase.from('reward_redemptions').insert({
+      child_id: child!.id,
+      reward_id: item.id,
+    })
+    setRequestedIds(prev => new Set([...prev, item.id]))
+    setRequesting(null)
+  }
+
   if (!child) return null
 
   const totalTasks = tasks.length
-  const pct = totalTasks > 0 ? ((taskIndex) / totalTasks) * 100 : 0
+  const pct = totalTasks > 0 ? (taskIndex / totalTasks) * 100 : 0
 
   return (
     <div className="min-h-screen flex flex-col items-center" style={{ background: 'var(--bg)', maxWidth: 400, margin: '0 auto' }}>
@@ -288,8 +312,13 @@ export function CheckinExperience() {
           </div>
 
           <div>
-            <h1 className="text-3xl font-bold mb-2">Hola, {child.name} 👋</h1>
-            <p className="text-base" style={{ color: 'var(--t2)' }}>
+            <h1 className="text-3xl font-bold mb-1">Hola, {child.name} 👋</h1>
+            <div className="flex items-center justify-center gap-2 mt-1">
+              <span className="text-sm font-semibold px-3 py-1 rounded-full" style={{ background: 'rgba(124,58,237,0.12)', color: 'var(--ac)' }}>
+                ⭐ {balance} puntos
+              </span>
+            </div>
+            <p className="text-base mt-2" style={{ color: 'var(--t2)' }}>
               Vamos a repasar tus tareas antes del tiempo libre
             </p>
           </div>
@@ -309,25 +338,36 @@ export function CheckinExperience() {
                   background: t.completed_today ? 'rgba(34,197,94,0.2)' : 'var(--surf2)',
                   border: `1px solid ${t.completed_today ? '#22c55e' : 'var(--bdr2)'}`,
                 }} />
-                <span style={{ color: t.completed_today ? 'var(--t2)' : 'var(--t1)' }}>{t.title}</span>
+                <span className="flex-1" style={{ color: t.completed_today ? 'var(--t2)' : 'var(--t1)' }}>{t.title}</span>
+                <span className="text-xs" style={{ color: 'var(--ac)' }}>+{t.points}</span>
               </div>
             ))}
           </div>
 
-          <button
-            onClick={startCheckin}
-            className="w-full py-4 rounded-2xl font-bold text-lg"
-            style={{ background: 'var(--ac)', color: '#fff', boxShadow: '0 0 32px rgba(124,58,237,0.35)' }}
-          >
-            Empezar →
-          </button>
+          <div className="flex flex-col gap-3 w-full">
+            <button
+              onClick={startCheckin}
+              className="w-full py-4 rounded-2xl font-bold text-lg"
+              style={{ background: 'var(--ac)', color: '#fff', boxShadow: '0 0 32px rgba(124,58,237,0.35)' }}
+            >
+              Empezar →
+            </button>
+            {catalog.length > 0 && (
+              <button
+                onClick={() => { stopSpeech(); setScreen('store') }}
+                className="w-full py-3 rounded-2xl font-semibold text-sm"
+                style={{ background: 'var(--surf)', border: '1px solid var(--bdr2)', color: 'var(--t2)' }}
+              >
+                🏆 Ver tienda de recompensas
+              </button>
+            )}
+          </div>
         </div>
       )}
 
       {/* ── Check-in ── */}
       {screen === 'checkin' && (
         <div className="flex flex-col items-center w-full flex-1 pb-24">
-          {/* Progress */}
           <div className="w-full px-6 pt-6 pb-2">
             <div className="flex justify-between text-xs mb-2" style={{ color: 'var(--t3)' }}>
               <span>Tarea {Math.min(taskIndex + 1, totalTasks)} de {totalTasks}</span>
@@ -338,7 +378,6 @@ export function CheckinExperience() {
             </div>
           </div>
 
-          {/* Avatar */}
           <div className="relative my-8 flex-shrink-0">
             <OrbCanvas size={150} speaking={speaking} color={child.avatar_color} />
             {speaking && [1,2,3].map(i => (
@@ -350,7 +389,6 @@ export function CheckinExperience() {
             ))}
           </div>
 
-          {/* Wave bars */}
           {speaking && (
             <div className="flex items-center gap-1 mb-4" style={{ height: 24 }}>
               {[6,12,20,14,8,18,10].map((h, i) => (
@@ -363,7 +401,6 @@ export function CheckinExperience() {
             </div>
           )}
 
-          {/* Question */}
           <div className="px-8 w-full text-center">
             {thinking && (
               <div className="flex justify-center gap-1.5 py-4">
@@ -380,7 +417,6 @@ export function CheckinExperience() {
             </p>
           </div>
 
-          {/* Chips */}
           {chips.length > 0 && (
             <div className="flex flex-col gap-3 px-6 mt-6 w-full">
               {chips.map((chip, i) => (
@@ -392,7 +428,6 @@ export function CheckinExperience() {
                     background: i === 0 ? 'rgba(34,197,94,0.12)' : i === 1 ? 'rgba(234,179,8,0.12)' : 'rgba(239,68,68,0.1)',
                     border: `1px solid ${i === 0 ? 'rgba(34,197,94,0.3)' : i === 1 ? 'rgba(234,179,8,0.3)' : 'rgba(239,68,68,0.2)'}`,
                     color: i === 0 ? '#22c55e' : i === 1 ? '#eab308' : '#ef4444',
-                    animationDelay: `${i * 0.07}s`,
                   }}
                 >
                   {chip}
@@ -401,7 +436,6 @@ export function CheckinExperience() {
             </div>
           )}
 
-          {/* Text input */}
           <div className="fixed bottom-6 left-0 right-0 px-6 max-w-[400px] mx-auto">
             <div className="flex gap-2">
               <input
@@ -435,30 +469,47 @@ export function CheckinExperience() {
             <div className="text-5xl mb-3">🎉</div>
             <h1 className="text-3xl font-bold mb-2">¡Todo listo, {child.name}!</h1>
             <p style={{ color: 'var(--t2)' }}>Te lo ganaste. ¡A disfrutar!</p>
+            <div className="mt-3">
+              <span className="text-sm font-semibold px-3 py-1 rounded-full" style={{ background: 'rgba(124,58,237,0.12)', color: 'var(--ac)' }}>
+                ⭐ {balance} puntos totales
+              </span>
+            </div>
           </div>
 
           <div className="w-full rounded-2xl p-4" style={{ background: 'var(--surf)', border: '1px solid rgba(34,197,94,0.3)' }}>
             <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--t3)' }}>
               Completaste hoy
             </p>
-            {tasks.map(t => (
+            {completedTasks.map(t => (
               <div key={t.id} className="flex items-center gap-2 py-1.5 text-sm">
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                   <circle cx="7" cy="7" r="7" fill="rgba(34,197,94,0.15)" />
                   <polyline points="3.5 7 6 9.5 10.5 4.5" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                <span style={{ color: 'var(--t2)' }}>{t.title}</span>
+                <span className="flex-1" style={{ color: 'var(--t2)' }}>{t.title}</span>
+                <span className="text-xs font-semibold" style={{ color: 'var(--ac)' }}>+{t.points} pts</span>
               </div>
             ))}
           </div>
 
-          <button
-            onClick={() => { stopSpeech(); router.push(`/c/${child.pin}`) }}
-            className="w-full py-4 rounded-2xl font-bold text-lg"
-            style={{ background: 'var(--ac)', color: '#fff' }}
-          >
-            ¡A jugar! →
-          </button>
+          <div className="flex flex-col gap-3 w-full">
+            {catalog.length > 0 && (
+              <button
+                onClick={() => setScreen('store')}
+                className="w-full py-3 rounded-2xl font-semibold text-sm"
+                style={{ background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.25)', color: 'var(--ac)' }}
+              >
+                🏆 Canjear en la tienda · {balance} pts
+              </button>
+            )}
+            <button
+              onClick={() => { stopSpeech(); router.push(`/c/${child.pin}`) }}
+              className="w-full py-4 rounded-2xl font-bold text-lg"
+              style={{ background: 'var(--ac)', color: '#fff' }}
+            >
+              ¡A jugar! →
+            </button>
+          </div>
         </div>
       )}
 
@@ -495,7 +546,74 @@ export function CheckinExperience() {
         </div>
       )}
 
-      {/* Global keyframe styles */}
+      {/* ── Store ── */}
+      {screen === 'store' && (
+        <div className="flex flex-col w-full flex-1 p-6 gap-5">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setScreen(completedTasks.length > 0 && pendingTasks.length === 0 ? 'done' : 'welcome')}
+              className="text-sm"
+              style={{ color: 'var(--t3)' }}
+            >
+              ←
+            </button>
+            <div className="flex-1">
+              <h1 className="text-xl font-bold">Tienda de recompensas</h1>
+            </div>
+            <span className="text-sm font-semibold px-3 py-1 rounded-full" style={{ background: 'rgba(124,58,237,0.12)', color: 'var(--ac)' }}>
+              ⭐ {balance} pts
+            </span>
+          </div>
+
+          {catalog.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center">
+              <p className="text-sm" style={{ color: 'var(--t3)' }}>La tienda está vacía por ahora.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {catalog.map(item => {
+                const canAfford = balance >= item.cost_points
+                const requested = requestedIds.has(item.id)
+                return (
+                  <div
+                    key={item.id}
+                    className="flex items-center gap-4 rounded-2xl p-4"
+                    style={{
+                      background: 'var(--surf)',
+                      border: `1px solid ${requested ? 'rgba(124,58,237,0.4)' : 'var(--bdr)'}`,
+                      opacity: !canAfford && !requested ? 0.55 : 1,
+                    }}
+                  >
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">{item.title}</p>
+                      <p className="text-xs font-semibold mt-0.5" style={{ color: 'var(--ac)' }}>
+                        {item.cost_points} pts
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => requestReward(item)}
+                      disabled={!canAfford || requested || requesting === item.id}
+                      className="px-4 py-2 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
+                      style={{
+                        background: requested ? 'rgba(34,197,94,0.15)' : canAfford ? 'var(--ac)' : 'var(--surf2)',
+                        color: requested ? '#22c55e' : canAfford ? '#fff' : 'var(--t3)',
+                        border: requested ? '1px solid rgba(34,197,94,0.3)' : 'none',
+                      }}
+                    >
+                      {requested ? '✓ Pedido' : requesting === item.id ? '…' : canAfford ? 'Pedir' : 'Faltan pts'}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          <p className="text-xs text-center" style={{ color: 'var(--t3)' }}>
+            Tu papá/mamá aprueba los canjes
+          </p>
+        </div>
+      )}
+
       <style>{`
         @keyframes sring {
           0%   { opacity: 0.7; transform: scale(0.88); }
