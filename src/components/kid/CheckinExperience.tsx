@@ -175,12 +175,12 @@ export function CheckinExperience() {
     setTaskIndex(0)
     setCompletedTasks([])
     setPendingTasks([])
-    askTask(0, tasks)
+    askTask(0, tasks, [], [])
   }
 
-  function askTask(idx: number, currentTasks: Task[]) {
+  function askTask(idx: number, currentTasks: Task[], pending: Task[], completed: Task[]) {
     if (idx >= currentTasks.length) {
-      finishCheckin()
+      finishCheckin(pending, completed)
       return
     }
     const task = currentTasks[idx]
@@ -198,8 +198,9 @@ export function CheckinExperience() {
       speak(q, () => {
         setSpeaking(false)
         if (task.completed_today) {
-          setCompletedTasks(prev => [...prev, task])
-          setTimeout(() => askTask(idx + 1, currentTasks), 800)
+          const newCompleted = [...completed, task]
+          setCompletedTasks(newCompleted)
+          setTimeout(() => askTask(idx + 1, currentTasks, pending, newCompleted), 800)
         } else {
           setChips(['Sí, ya la hice ✅', 'Me falta un poco ⏳', 'No la hice todavía ❌'])
         }
@@ -220,34 +221,38 @@ export function CheckinExperience() {
     next()
   }
 
-  async function respondTask(response: string) {
+  async function respondTask(response: string, pending: Task[], completed: Task[]) {
     stopSpeech()
     setChips([])
     const task = tasks[taskIndex]
-    const completed = response.includes('✅') || response.includes('Sí')
+    const didComplete = response.includes('✅') || response.includes('Sí')
 
-    if (completed) {
-      // Record completion in DB
+    let newPending = pending
+    let newCompleted = completed
+
+    if (didComplete) {
       const supabase = createClient()
       await supabase.from('task_completions').upsert({
         task_id: task.id,
         child_id: child!.id,
         date: new Date().toISOString().split('T')[0],
       }, { onConflict: 'task_id,date' })
-      setCompletedTasks(prev => [...prev, task])
+      newCompleted = [...completed, task]
+      setCompletedTasks(newCompleted)
     } else {
-      setPendingTasks(prev => [...prev, task])
+      newPending = [...pending, task]
+      setPendingTasks(newPending)
     }
 
     const next = taskIndex + 1
     setTaskIndex(next)
-    askTask(next, tasks)
+    askTask(next, tasks, newPending, newCompleted)
   }
 
-  function finishCheckin() {
+  function finishCheckin(pending: Task[], completed: Task[]) {
     setSpeaking(false)
     setThinking(false)
-    if (pendingTasks.length === 0) {
+    if (pending.length === 0) {
       setScreen('done')
       setSpeaking(true)
       speak('Muy bien! Completaste todas tus tareas. Ya podés disfrutar tu tiempo libre.', () => setSpeaking(false))
@@ -374,7 +379,7 @@ export function CheckinExperience() {
               {chips.map((chip, i) => (
                 <button
                   key={chip}
-                  onClick={() => respondTask(chip)}
+                  onClick={() => respondTask(chip, pendingTasks, completedTasks)}
                   className="w-full py-3.5 rounded-2xl text-sm font-semibold transition-transform active:scale-95"
                   style={{
                     background: i === 0 ? 'rgba(34,197,94,0.12)' : i === 1 ? 'rgba(234,179,8,0.12)' : 'rgba(239,68,68,0.1)',
@@ -395,7 +400,7 @@ export function CheckinExperience() {
               <input
                 value={answer}
                 onChange={e => setAnswer(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && answer.trim()) { respondTask(answer.trim()); setAnswer('') } }}
+                onKeyDown={e => { if (e.key === 'Enter' && answer.trim()) { respondTask(answer.trim(), pendingTasks, completedTasks); setAnswer('') } }}
                 className="flex-1 rounded-xl px-4 py-3 text-sm outline-none"
                 style={{ background: 'var(--surf)', border: '1px solid var(--bdr2)', color: 'var(--t1)' }}
                 placeholder="O escribí tu respuesta…"
