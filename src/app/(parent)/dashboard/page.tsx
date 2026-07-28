@@ -1,0 +1,124 @@
+import { createClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
+import Link from 'next/link'
+import { ChildCard } from '@/components/parent/ChildCard'
+import { RealtimeDashboard } from '@/components/parent/RealtimeDashboard'
+import type { ChildWithProgress } from '@/types'
+
+export const dynamic = 'force-dynamic'
+
+async function getFamily(userId: string) {
+  const supabase = await createClient()
+
+  const { data: family } = await supabase
+    .from('families')
+    .select('*')
+    .eq('parent_id', userId)
+    .single()
+
+  if (!family) return null
+
+  const today = new Date().toISOString().split('T')[0]
+
+  const { data: children } = await supabase
+    .from('children')
+    .select(`
+      *,
+      tasks!inner (
+        *,
+        task_completions (id, date, completed_at)
+      )
+    `)
+    .eq('family_id', family.id)
+    .eq('tasks.active', true)
+    .order('created_at', { ascending: true })
+
+  const enriched: ChildWithProgress[] = (children ?? []).map(child => {
+    const tasks = (child.tasks ?? []).map((t: any) => {
+      const completedToday = t.task_completions?.some((c: any) => c.date === today) ?? false
+      return { ...t, completed_today: completedToday }
+    })
+    const completed = tasks.filter((t: any) => t.completed_today).length
+    return {
+      ...child,
+      tasks,
+      total_tasks: tasks.length,
+      completed_tasks: completed,
+      all_done: tasks.length > 0 && completed === tasks.length,
+    }
+  })
+
+  return { family, children: enriched }
+}
+
+export default async function DashboardPage() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const data = await getFamily(user.id)
+
+  if (!data) {
+    return (
+      <div className="text-center py-20">
+        <p style={{ color: 'var(--t3)' }}>Error cargando la familia.</p>
+      </div>
+    )
+  }
+
+  const { family, children } = data
+
+  return (
+    <div className="space-y-6">
+      {/* Family PIN */}
+      <div className="rounded-2xl p-4 flex items-center justify-between" style={{ background: 'var(--surf)', border: '1px solid var(--bdr)' }}>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: 'var(--t3)' }}>Código familiar</p>
+          <p className="text-2xl font-bold tracking-widest" style={{ color: 'var(--ac)' }}>{family.family_pin}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-xs" style={{ color: 'var(--t2)' }}>Tus hijos entran en</p>
+          <p className="text-xs font-medium" style={{ color: 'var(--t3)' }}>listo.app/c/{family.family_pin.toLowerCase()}</p>
+        </div>
+      </div>
+
+      {/* Children */}
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold">Hoy</h2>
+          <Link
+            href="/hijos/nuevo"
+            className="text-sm font-medium px-3 py-1.5 rounded-lg"
+            style={{ background: 'var(--ac-dim)', color: 'var(--ac)', border: '1px solid rgba(124,58,237,0.25)' }}
+          >
+            + Hijo
+          </Link>
+        </div>
+
+        {children.length === 0 ? (
+          <div className="rounded-2xl p-8 text-center" style={{ background: 'var(--surf)', border: '1px solid var(--bdr)' }}>
+            <p className="text-4xl mb-3">👨‍👩‍👧</p>
+            <p className="font-semibold mb-1">Agregá tu primer hijo</p>
+            <p className="text-sm mb-4" style={{ color: 'var(--t2)' }}>Creá el perfil y configurá sus tareas diarias</p>
+            <Link
+              href="/hijos/nuevo"
+              className="inline-block px-5 py-2.5 rounded-xl font-semibold text-sm"
+              style={{ background: 'var(--ac)', color: '#fff' }}
+            >
+              Agregar hijo
+            </Link>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {children.map(child => (
+              <ChildCard key={child.id} child={child} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Real-time updater (client component) */}
+      <RealtimeDashboard familyId={family.id} />
+    </div>
+  )
+}
