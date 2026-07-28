@@ -25,7 +25,8 @@ CREATE TABLE tasks (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   child_id    uuid REFERENCES children(id) ON DELETE CASCADE NOT NULL,
   title       text NOT NULL,
-  recurrence  text NOT NULL DEFAULT 'daily' CHECK (recurrence IN ('daily', 'weekdays', 'weekend')),
+  recurrence  text NOT NULL DEFAULT 'daily' CHECK (recurrence IN ('daily', 'weekdays', 'weekend', 'custom')),
+  days        smallint[] DEFAULT NULL,  -- used when recurrence='custom': [0=Dom,1=Lun,...,6=Sab]
   active      boolean NOT NULL DEFAULT true,
   created_at  timestamptz DEFAULT now()
 );

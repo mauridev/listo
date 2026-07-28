@@ -7,7 +7,16 @@ import { createClient } from '@/lib/supabase/client'
 // ── Types ──────────────────────────────────────────────────────────────────
 
 type KidChild = { id: string; name: string; avatar_color: string; familyId: string; pin: string }
-type Task = { id: string; title: string; completed_today: boolean }
+type Task = { id: string; title: string; recurrence: string; days: number[] | null; completed_today: boolean }
+
+function taskAppliesToday(task: { recurrence: string; days: number[] | null }): boolean {
+  const day = new Date().getDay() // 0=Dom, 1=Lun, ..., 6=Sáb
+  if (task.recurrence === 'daily') return true
+  if (task.recurrence === 'weekdays') return day >= 1 && day <= 5
+  if (task.recurrence === 'weekend') return day === 0 || day === 6
+  if (task.recurrence === 'custom') return task.days?.includes(day) ?? false
+  return true
+}
 type Screen = 'welcome' | 'checkin' | 'done' | 'pending'
 
 // ── Orb Canvas Component ───────────────────────────────────────────────────
@@ -136,11 +145,16 @@ export function CheckinExperience() {
         .eq('child_id', c.id)
         .eq('active', true)
       if (data) {
-        setTasks(data.map(t => ({
-          id: t.id,
-          title: t.title,
-          completed_today: t.task_completions?.some((tc: any) => tc.date === today) ?? false,
-        })))
+        const todayTasks = data
+          .filter(t => taskAppliesToday(t))
+          .map(t => ({
+            id: t.id,
+            title: t.title,
+            recurrence: t.recurrence,
+            days: t.days ?? null,
+            completed_today: t.task_completions?.some((tc: any) => tc.date === today) ?? false,
+          }))
+        setTasks(todayTasks)
       }
     }
     fetchTasks()

@@ -17,7 +17,8 @@ export type Task = {
   id: string
   child_id: string
   title: string
-  recurrence: 'daily' | 'weekdays' | 'weekend'
+  recurrence: 'daily' | 'weekdays' | 'weekend' | 'custom'
+  days: number[] | null
   active: boolean
   created_at: string
 }

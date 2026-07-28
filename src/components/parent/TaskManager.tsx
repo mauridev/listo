@@ -5,10 +5,22 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 
+const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
+
+function recurrenceLabel(recurrence: string, days: number[] | null): string {
+  if (recurrence === 'weekdays') return 'Lun–Vie'
+  if (recurrence === 'weekend') return 'Fin de semana'
+  if (recurrence === 'custom' && days?.length) {
+    return days.sort((a, b) => a - b).map(d => DAY_LABELS[d]).join(', ')
+  }
+  return ''
+}
+
 type Task = {
   id: string
   title: string
   recurrence: string
+  days: number[] | null
   active: boolean
   completed_today: boolean
 }
@@ -24,7 +36,8 @@ export function TaskManager({ child }: { child: Child }) {
   const router = useRouter()
   const [tasks, setTasks] = useState<Task[]>(child.tasks)
   const [newTitle, setNewTitle] = useState('')
-  const [newRecurrence, setNewRecurrence] = useState<'daily' | 'weekdays' | 'weekend'>('daily')
+  const [newRecurrence, setNewRecurrence] = useState<'daily' | 'weekdays' | 'weekend' | 'custom'>('daily')
+  const [newDays, setNewDays] = useState<number[]>([])
   const [adding, setAdding] = useState(false)
   const [showForm, setShowForm] = useState(false)
 
@@ -38,13 +51,14 @@ export function TaskManager({ child }: { child: Child }) {
     const supabase = createClient()
     const { data, error } = await supabase
       .from('tasks')
-      .insert({ child_id: child.id, title: newTitle.trim(), recurrence: newRecurrence })
+      .insert({ child_id: child.id, title: newTitle.trim(), recurrence: newRecurrence, days: newRecurrence === 'custom' ? newDays : null })
       .select()
       .single()
     if (!error && data) {
       setTasks(prev => [...prev, { ...data, completed_today: false }])
       setNewTitle('')
       setNewRecurrence('daily')
+      setNewDays([])
       setShowForm(false)
     }
     setAdding(false)
@@ -125,7 +139,7 @@ export function TaskManager({ child }: { child: Child }) {
               <p className="text-sm">{task.title}</p>
               {task.recurrence !== 'daily' && (
                 <p className="text-xs mt-0.5" style={{ color: 'var(--t3)' }}>
-                  {task.recurrence === 'weekdays' ? 'Lun–Vie' : 'Fin de semana'}
+                  {recurrenceLabel(task.recurrence, task.days)}
                 </p>
               )}
             </div>
@@ -162,11 +176,12 @@ export function TaskManager({ child }: { child: Child }) {
             autoFocus
           />
           {/* Recurrence selector */}
-          <div className="flex gap-2">
+          <div className="flex gap-1.5 flex-wrap">
             {([
               { value: 'daily', label: 'Todos los días' },
               { value: 'weekdays', label: 'Lun–Vie' },
               { value: 'weekend', label: 'Fin de semana' },
+              { value: 'custom', label: 'Días específicos' },
             ] as const).map(opt => (
               <button
                 key={opt.value}
@@ -183,6 +198,29 @@ export function TaskManager({ child }: { child: Child }) {
               </button>
             ))}
           </div>
+          {/* Day picker for custom */}
+          {newRecurrence === 'custom' && (
+            <div className="flex gap-1.5 justify-between">
+              {DAY_LABELS.map((label, idx) => {
+                const selected = newDays.includes(idx)
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setNewDays(prev => selected ? prev.filter(d => d !== idx) : [...prev, idx])}
+                    className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
+                    style={{
+                      background: selected ? 'var(--ac)' : 'var(--surf)',
+                      color: selected ? '#fff' : 'var(--t3)',
+                      border: `1px solid ${selected ? 'var(--ac)' : 'var(--bdr)'}`,
+                    }}
+                  >
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+          )}
           <div className="flex gap-2">
             <button
               type="submit" disabled={adding || !newTitle.trim()}
