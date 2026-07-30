@@ -38,6 +38,7 @@ export default async function KidPinPage({ params }: { params: Promise<{ pin: st
       days: t.days ?? null,
       points: t.points ?? 10,
       completed_today: t.task_completions?.some((tc: any) => tc.date === today) ?? false,
+      completion_dates: (t.task_completions ?? []).map((tc: any) => tc.date as string),
     }))
 
   return (

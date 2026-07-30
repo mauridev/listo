@@ -17,7 +17,13 @@ type Task = {
   id: string
   title: string
   points: number
+  completion_dates?: string[]
   completed_today: boolean
+}
+
+function localDateStr(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 // ── Shared noise GLSL ──────────────────────────────────────────────────────
@@ -212,8 +218,14 @@ function PlanetScene({ color }: { color: string }) {
 
 // ── KidHome ────────────────────────────────────────────────────────────────
 
-export function KidHome({ child, tasks }: { child: KidChild; tasks: Task[] }) {
+export function KidHome({ child, tasks: rawTasks }: { child: KidChild; tasks: Task[] }) {
   const router = useRouter()
+  // Recompute completed_today with local browser date (fixes UTC vs local timezone bug)
+  const today = localDateStr()
+  const tasks = rawTasks.map(t => ({
+    ...t,
+    completed_today: t.completion_dates ? t.completion_dates.includes(today) : t.completed_today,
+  }))
   const allDone = tasks.length > 0 && tasks.every(t => t.completed_today)
   const completedCount = tasks.filter(t => t.completed_today).length
 
@@ -237,11 +249,12 @@ export function KidHome({ child, tasks }: { child: KidChild; tasks: Task[] }) {
         pointerEvents: 'none',
       }} />
 
-      {/* Content */}
+      {/* Content — always white text: planet scene is always dark regardless of theme */}
       <div style={{
         position: 'relative', zIndex: 2, minHeight: '100vh',
         display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
         padding: '0 1.5rem 2.5rem', maxWidth: 400, margin: '0 auto',
+        color: '#fff',
       }}>
 
         <div className="mb-5">
@@ -256,7 +269,7 @@ export function KidHome({ child, tasks }: { child: KidChild; tasks: Task[] }) {
         {child.reward_text && (
           <div className="mb-4 px-4 py-3 rounded-2xl" style={{ background: 'rgba(124,58,237,0.12)', border: '1px solid rgba(124,58,237,0.25)' }}>
             <p className="text-xs font-semibold uppercase tracking-widest mb-0.5" style={{ color: 'rgba(167,139,250,0.7)' }}>Recompensa de esta semana</p>
-            <p className="text-sm font-medium" style={{ color: 'var(--t1)' }}>{child.reward_text}</p>
+            <p className="text-sm font-medium" style={{ color: 'rgba(255,255,255,0.92)' }}>{child.reward_text}</p>
           </div>
         )}
 

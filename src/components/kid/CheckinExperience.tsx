@@ -13,6 +13,11 @@ type CatalogItem = { id: string; title: string; cost_points: number }
 type Redemption = { id: string; status: 'pending' | 'approved' | 'rejected'; rewards_catalog?: { title: string; cost_points: number } }
 type Screen = 'checkin' | 'done' | 'pending' | 'store'
 
+function localDateStr(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 function taskAppliesToday(task: { recurrence: string; days: number[] | null }): boolean {
   const day = new Date().getDay()
   if (task.recurrence === 'daily') return true
@@ -315,7 +320,7 @@ export function CheckinExperience() {
 
     async function fetchAll() {
       const supabase = createClient()
-      const today = new Date().toISOString().split('T')[0]
+      const today = localDateStr()
 
       const [{ data: tasksData }, { data: balanceData }, { data: catalogData }, { data: redemptionsData }] = await Promise.all([
         supabase.from('tasks').select('*, task_completions(id, date)').eq('child_id', c.id).eq('active', true),
@@ -393,7 +398,7 @@ export function CheckinExperience() {
     let newPending = pending, newCompleted = completed
     if (didComplete) {
       const supabase = createClient()
-      const today = new Date().toISOString().split('T')[0]
+      const today = localDateStr()
       await supabase.from('task_completions').upsert({ task_id: task.id, child_id: child!.id, date: today }, { onConflict: 'task_id,date' })
       await supabase.from('point_transactions').insert({ child_id: child!.id, delta: task.points, reason: task.title })
       setBalance(prev => prev + task.points)

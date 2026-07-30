@@ -11,7 +11,7 @@ export default async function ParentLayout({ children }: { children: React.React
   return (
     <div className="min-h-screen" style={{ background: 'var(--bg)' }}>
       {/* Header */}
-      <header className="border-b sticky top-0 z-10 backdrop-blur-sm" style={{ borderColor: 'var(--bdr)', background: 'rgba(10,10,10,0.85)' }}>
+      <header className="border-b sticky top-0 z-10 backdrop-blur-sm" style={{ borderColor: 'var(--bdr)', background: 'var(--header-bg)' }}>
         <div className="max-w-2xl mx-auto px-4 h-14 flex items-center justify-between">
           <Link href="/dashboard" className="flex items-center gap-2">
             <div className="w-2.5 h-2.5 rounded-full" style={{ background: 'var(--ac)', boxShadow: '0 0 8px var(--ac-glow)' }} />
