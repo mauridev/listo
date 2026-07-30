@@ -16,11 +16,16 @@ export default async function ParentLayout({ children }: { children: React.React
             <div className="w-2.5 h-2.5 rounded-full" style={{ background: 'var(--ac)', boxShadow: '0 0 8px var(--ac-glow)' }} />
             <span className="font-bold text-base tracking-tight">Listo</span>
           </Link>
-          <form action="/api/auth/logout" method="post">
-            <button type="submit" className="text-xs px-3 py-1.5 rounded-lg transition-colors hover:opacity-70" style={{ color: 'var(--t3)', border: '1px solid var(--bdr)' }}>
-              Salir
-            </button>
-          </form>
+          <div className="flex items-center gap-2">
+            <Link href="/ayuda" className="text-xs px-3 py-1.5 rounded-lg transition-colors hover:opacity-70" style={{ color: 'var(--t3)', border: '1px solid var(--bdr)' }}>
+              Ayuda
+            </Link>
+            <form action="/api/auth/logout" method="post">
+              <button type="submit" className="text-xs px-3 py-1.5 rounded-lg transition-colors hover:opacity-70" style={{ color: 'var(--t3)', border: '1px solid var(--bdr)' }}>
+                Salir
+              </button>
+            </form>
+          </div>
         </div>
       </header>
 

@@ -45,8 +45,16 @@ export function RewardsCatalog({
   }
 
   async function approveRedemption(id: string) {
+    const redemption = redemptions.find(r => r.id === id)
     const supabase = createClient()
     await supabase.from('reward_redemptions').update({ status: 'approved' }).eq('id', id)
+    if (redemption?.rewards_catalog) {
+      await supabase.from('point_transactions').insert({
+        child_id: redemption.child_id,
+        delta: -redemption.rewards_catalog.cost_points,
+        reason: `Canje: ${redemption.rewards_catalog.title}`,
+      })
+    }
     setRedemptions(prev => prev.map(r => r.id === id ? { ...r, status: 'approved' as const } : r))
   }
 
