@@ -17,7 +17,7 @@ export default async function ParentLayout({ children }: { children: React.React
             <span className="font-bold text-base tracking-tight">Listo</span>
           </Link>
           <div className="flex items-center gap-2">
-            <Link href="/ayuda" className="text-xs px-3 py-1.5 rounded-lg transition-colors hover:opacity-70" style={{ color: 'var(--t3)', border: '1px solid var(--bdr)' }}>
+            <Link href="/help" className="text-xs px-3 py-1.5 rounded-lg transition-colors hover:opacity-70" style={{ color: 'var(--t3)', border: '1px solid var(--bdr)' }}>
               Ayuda
             </Link>
             <form action="/api/auth/logout" method="post">
