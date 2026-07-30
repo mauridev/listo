@@ -80,19 +80,30 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      {/* Family PIN */}
-      <div className="rounded-2xl p-4 flex items-center justify-between" style={{ background: 'var(--surf)', border: '1px solid var(--bdr)' }}>
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: 'var(--t3)' }}>Código familiar</p>
-          <p className="text-2xl font-bold tracking-widest" style={{ color: 'var(--ac)' }}>{family.family_pin}</p>
+      {/* Per-child access links */}
+      {children.length > 0 && (
+        <div className="rounded-2xl p-4" style={{ background: 'var(--surf)', border: '1px solid var(--bdr)' }}>
+          <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--t3)' }}>Acceso de hijos</p>
+          <div className="space-y-2">
+            {children.map(child => (
+              <div key={child.id} className="flex items-center gap-3">
+                <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0" style={{ background: child.avatar_color, color: '#fff' }}>
+                  {child.name[0].toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium" style={{ color: 'var(--t1)' }}>{child.name}</p>
+                  <p className="text-xs truncate" style={{ color: 'var(--t3)' }}>
+                    {(process.env.NEXT_PUBLIC_APP_URL || 'listo-lemon-ten.vercel.app')}/c/{(child as any).child_pin?.toLowerCase()}
+                  </p>
+                </div>
+                <span className="text-xs font-bold tracking-widest px-2 py-1 rounded-lg flex-shrink-0" style={{ background: 'var(--surf2)', color: 'var(--ac)' }}>
+                  {(child as any).child_pin}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
-        <div className="text-right">
-          <p className="text-xs" style={{ color: 'var(--t2)' }}>Tus hijos entran en</p>
-          <p className="text-xs font-medium" style={{ color: 'var(--t3)' }}>
-            {(process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL || 'listo-lemon-ten.vercel.app')}/c/{family.family_pin.toLowerCase()}
-          </p>
-        </div>
-      </div>
+      )}
 
       {/* Children */}
       <div>

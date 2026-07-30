@@ -14,6 +14,11 @@ export default function NuevoHijoPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
+  function generatePin(): string {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+    return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!name.trim()) return
@@ -33,7 +38,7 @@ export default function NuevoHijoPage() {
 
     const { data: child, error: childError } = await supabase
       .from('children')
-      .insert({ family_id: family.id, name: name.trim(), avatar_color: color })
+      .insert({ family_id: family.id, name: name.trim(), avatar_color: color, child_pin: generatePin() })
       .select()
       .single()
 

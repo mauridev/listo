@@ -9,7 +9,8 @@ import { createClient } from '@/lib/supabase/client'
 type KidChild = { id: string; name: string; avatar_color: string; familyId: string; pin: string; reward_text: string | null }
 type Task = { id: string; title: string; recurrence: string; days: number[] | null; points: number; completed_today: boolean }
 type CatalogItem = { id: string; title: string; cost_points: number }
-type Screen = 'welcome' | 'checkin' | 'done' | 'pending' | 'store'
+type Redemption = { id: string; status: 'pending' | 'approved' | 'rejected'; rewards_catalog?: { title: string; cost_points: number } }
+type Screen = 'checkin' | 'done' | 'pending' | 'store'
 
 function taskAppliesToday(task: { recurrence: string; days: number[] | null }): boolean {
   const day = new Date().getDay()
@@ -20,12 +21,11 @@ function taskAppliesToday(task: { recurrence: string; days: number[] | null }): 
   return true
 }
 
-// ── Orb Canvas Component ───────────────────────────────────────────────────
+// ── Orb ───────────────────────────────────────────────────────────────────
 
 function OrbCanvas({ size, speaking, color }: { size: number; speaking: boolean; color: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const frameRef = useRef<number>(0)
-  const timeRef = useRef(0)
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -50,17 +50,14 @@ function OrbCanvas({ size, speaking, color }: { size: number; speaking: boolean;
       for (let i = 0; i <= N; i++) {
         const a = (i / N) * Math.PI * 2
         const rr = waves.reduce((acc, w) => acc + w.am * Math.sin(w.fr * a + t * w.sp + w.ph), r)
-        const x = cx + Math.cos(a) * rr
-        const y = cy + Math.sin(a) * rr
-        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
+        i === 0 ? ctx.moveTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr)
+                : ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr)
       }
       ctx.closePath()
       const pulse = (Math.sin(t * 0.55) + 1) / 2
       const g = ctx.createRadialGradient(cx - r * 0.2, cy - r * 0.26, 0, cx, cy, r * 1.15)
       g.addColorStop(0, `rgba(180,140,255,${0.8 + pulse * 0.2})`)
-      g.addColorStop(0.42, color)
-      g.addColorStop(0.78, '#4C1D95')
-      g.addColorStop(1, '#2E1065')
+      g.addColorStop(0.42, color); g.addColorStop(0.78, '#4C1D95'); g.addColorStop(1, '#2E1065')
       ctx.fillStyle = g; ctx.fill()
       const h = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.36, 0, cx, cy, r * 0.72)
       h.addColorStop(0, 'rgba(255,255,255,0.28)'); h.addColorStop(1, 'rgba(255,255,255,0)')
@@ -68,16 +65,12 @@ function OrbCanvas({ size, speaking, color }: { size: number; speaking: boolean;
       const gl = ctx.createRadialGradient(cx, cy, r * 0.92, cx, cy, r * 1.6)
       gl.addColorStop(0, `rgba(124,58,237,${speaking ? 0.12 + pulse * 0.1 : 0.05 + pulse * 0.04})`)
       gl.addColorStop(1, 'rgba(124,58,237,0)')
-      ctx.save(); ctx.beginPath()
-      ctx.arc(cx, cy, r * 1.6, 0, Math.PI * 2)
+      ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, r * 1.6, 0, Math.PI * 2)
       ctx.fillStyle = gl; ctx.fill(); ctx.restore()
     }
 
-    function tick(ms: number) {
-      timeRef.current = ms * 0.003
-      draw(timeRef.current)
-      frameRef.current = requestAnimationFrame(tick)
-    }
+    let t = 0
+    function tick(ms: number) { t = ms * 0.003; draw(t); frameRef.current = requestAnimationFrame(tick) }
     frameRef.current = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frameRef.current)
   }, [size, color, speaking])
@@ -88,10 +81,7 @@ function OrbCanvas({ size, speaking, color }: { size: number; speaking: boolean;
 // ── Speech ─────────────────────────────────────────────────────────────────
 
 function stripEmoji(text: string) {
-  return text
-    .replace(/[\u{1F000}-\u{1FFFF}]/gu, '')
-    .replace(/[\u{2600}-\u{27BF}]/gu, '')
-    .replace(/\s{2,}/g, ' ').trim()
+  return text.replace(/[\u{1F000}-\u{1FFFF}]/gu, '').replace(/[\u{2600}-\u{27BF}]/gu, '').replace(/\s{2,}/g, ' ').trim()
 }
 
 let speechCancelled = false
@@ -101,12 +91,11 @@ function speak(text: string, onDone?: () => void) {
   window.speechSynthesis.cancel()
   const u = new SpeechSynthesisUtterance(stripEmoji(text))
   u.lang = 'es-419'; u.rate = 0.92; u.pitch = 1.08
-  const voices = window.speechSynthesis.getVoices()
-  const v = voices.find(v => v.lang.toLowerCase().startsWith('es') && v.localService)
-         || voices.find(v => v.lang.toLowerCase().startsWith('es'))
+  const v = window.speechSynthesis.getVoices().find(v => v.lang.toLowerCase().startsWith('es') && v.localService)
+         || window.speechSynthesis.getVoices().find(v => v.lang.toLowerCase().startsWith('es'))
   if (v) u.voice = v
   u.onend = () => { if (!speechCancelled) onDone?.() }
-  u.onerror = () => { onDone?.() }
+  u.onerror = () => onDone?.()
   window.speechSynthesis.speak(u)
 }
 function stopSpeech() { speechCancelled = true; window.speechSynthesis?.cancel() }
@@ -119,17 +108,20 @@ export function CheckinExperience() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [balance, setBalance] = useState(0)
   const [catalog, setCatalog] = useState<CatalogItem[]>([])
-  const [screen, setScreen] = useState<Screen>('welcome')
+  const [redemptions, setRedemptions] = useState<Redemption[]>([])
+  const [screen, setScreen] = useState<Screen>('checkin')
   const [taskIndex, setTaskIndex] = useState(0)
   const [speaking, setSpeaking] = useState(false)
   const [questionText, setQuestionText] = useState('')
   const [thinking, setThinking] = useState(false)
   const [chips, setChips] = useState<string[]>([])
-  const [answer, setAnswer] = useState('')
   const [pendingTasks, setPendingTasks] = useState<Task[]>([])
   const [completedTasks, setCompletedTasks] = useState<Task[]>([])
   const [requesting, setRequesting] = useState<string | null>(null)
   const [requestedIds, setRequestedIds] = useState<Set<string>>(new Set())
+
+  // Ref that captures current task context for respondTask — avoids stale closure bugs
+  const pendingResponse = useRef<{ task: Task; idx: number; pending: Task[]; completed: Task[] } | null>(null)
 
   useEffect(() => {
     const stored = sessionStorage.getItem('listo_child')
@@ -141,76 +133,78 @@ export function CheckinExperience() {
       const supabase = createClient()
       const today = new Date().toISOString().split('T')[0]
 
-      const [{ data: tasksData }, { data: balanceData }, { data: catalogData }] = await Promise.all([
-        supabase.from('tasks').select(`*, task_completions(id, date)`).eq('child_id', c.id).eq('active', true),
+      const [{ data: tasksData }, { data: balanceData }, { data: catalogData }, { data: redemptionsData }] = await Promise.all([
+        supabase.from('tasks').select('*, task_completions(id, date)').eq('child_id', c.id).eq('active', true),
         supabase.rpc('get_child_balance', { p_child_id: c.id }),
         supabase.from('rewards_catalog').select('id, title, cost_points').eq('child_id', c.id).eq('active', true).order('cost_points'),
+        supabase.from('reward_redemptions').select('*, rewards_catalog(title, cost_points)').eq('child_id', c.id).order('created_at', { ascending: false }).limit(10),
       ])
 
-      if (tasksData) {
-        const todayTasks = tasksData
-          .filter(t => taskAppliesToday(t))
-          .map(t => ({
-            id: t.id,
-            title: t.title,
-            recurrence: t.recurrence,
-            days: t.days ?? null,
-            points: t.points ?? 10,
-            completed_today: t.task_completions?.some((tc: any) => tc.date === today) ?? false,
-          }))
-        setTasks(todayTasks)
-      }
+      const todayTasks: Task[] = (tasksData ?? [])
+        .filter((t: any) => taskAppliesToday(t))
+        .map((t: any) => ({
+          id: t.id,
+          title: t.title,
+          recurrence: t.recurrence,
+          days: t.days ?? null,
+          points: t.points ?? 10,
+          completed_today: t.task_completions?.some((tc: any) => tc.date === today) ?? false,
+        }))
+
+      setTasks(todayTasks)
       setBalance(balanceData ?? 0)
       setCatalog(catalogData ?? [])
+      setRedemptions(redemptionsData ?? [])
+
+      // Start check-in immediately after loading
+      startCheckinWith(todayTasks, c)
     }
     fetchAll()
   }, [router])
 
-  useEffect(() => {
-    if (!child || tasks.length === 0 || screen !== 'welcome') return
+  function startCheckinWith(loadedTasks: Task[], c: KidChild) {
+    stopSpeech()
     setSpeaking(true)
     setTimeout(() => {
-      speak(`Hola ${child.name}! Antes de tu tiempo libre, vamos a repasar las tareas de hoy.`, () => setSpeaking(false))
-    }, 600)
-  }, [child, tasks.length, screen])
-
-  function startCheckin() {
-    stopSpeech()
-    setScreen('checkin')
-    setTaskIndex(0)
-    setCompletedTasks([])
-    setPendingTasks([])
-    askTask(0, tasks, [], [])
+      speak(`¡Hola ${c.name}! Vamos con tus tareas.`, () => {
+        setSpeaking(false)
+        askTask(0, loadedTasks, [], [])
+      })
+    }, 400)
   }
 
   function askTask(idx: number, currentTasks: Task[], pending: Task[], completed: Task[]) {
+    setTaskIndex(idx)
+
     if (idx >= currentTasks.length) {
       finishCheckin(pending, completed)
       return
     }
+
     const task = currentTasks[idx]
+
+    // Skip already-completed tasks silently
+    if (task.completed_today) {
+      askTask(idx + 1, currentTasks, pending, [...completed, task])
+      return
+    }
+
     setSpeaking(true)
     setThinking(true)
     setChips([])
     setQuestionText('')
+    pendingResponse.current = null
 
     setTimeout(() => {
       setThinking(false)
-      const q = task.completed_today
-        ? `Ya completaste "${task.title}" hoy. Bien hecho!`
-        : `¿Ya hiciste "${task.title}"?`
+      const q = `¿Ya hiciste "${task.title}"?`
       revealText(q)
       speak(q, () => {
         setSpeaking(false)
-        if (task.completed_today) {
-          const newCompleted = [...completed, task]
-          setCompletedTasks(newCompleted)
-          setTimeout(() => askTask(idx + 1, currentTasks, pending, newCompleted), 800)
-        } else {
-          setChips(['Sí, ya la hice ✅', 'Me falta un poco ⏳', 'No la hice todavía ❌'])
-        }
+        pendingResponse.current = { task, idx, pending, completed }
+        setChips(['Sí, ya la hice ✅', 'Me falta un poco ⏳', 'No la hice todavía ❌'])
       })
-    }, 700)
+    }, 600)
   }
 
   function revealText(text: string) {
@@ -219,18 +213,22 @@ export function CheckinExperience() {
     let i = 0
     function next() {
       if (i >= words.length) return
-      const word = (i > 0 ? ' ' : '') + words[i++]
-      setQuestionText(prev => prev + word)
+      setQuestionText(prev => prev + (i > 0 ? ' ' : '') + words[i++])
       setTimeout(next, 65 + Math.random() * 35)
     }
     next()
   }
 
-  async function respondTask(response: string, pending: Task[], completed: Task[]) {
+  async function respondTask(response: string) {
+    const ctx = pendingResponse.current
+    if (!ctx) return
+    pendingResponse.current = null
+
     stopSpeech()
     setChips([])
-    const task = tasks[taskIndex]
-    const didComplete = response.includes('✅') || response.includes('Sí')
+
+    const { task, idx, pending, completed } = ctx
+    const didComplete = response.includes('✅') || response.toLowerCase().startsWith('sí') || response.toLowerCase().startsWith('si')
 
     let newPending = pending
     let newCompleted = completed
@@ -238,16 +236,11 @@ export function CheckinExperience() {
     if (didComplete) {
       const supabase = createClient()
       const today = new Date().toISOString().split('T')[0]
-      await supabase.from('task_completions').upsert({
-        task_id: task.id,
-        child_id: child!.id,
-        date: today,
-      }, { onConflict: 'task_id,date' })
-      await supabase.from('point_transactions').insert({
-        child_id: child!.id,
-        delta: task.points,
-        reason: task.title,
-      })
+      await supabase.from('task_completions').upsert(
+        { task_id: task.id, child_id: child!.id, date: today },
+        { onConflict: 'task_id,date' }
+      )
+      await supabase.from('point_transactions').insert({ child_id: child!.id, delta: task.points, reason: task.title })
       setBalance(prev => prev + task.points)
       newCompleted = [...completed, task]
       setCompletedTasks(newCompleted)
@@ -256,9 +249,7 @@ export function CheckinExperience() {
       setPendingTasks(newPending)
     }
 
-    const next = taskIndex + 1
-    setTaskIndex(next)
-    askTask(next, tasks, newPending, newCompleted)
+    askTask(idx + 1, tasks, newPending, newCompleted)
   }
 
   function finishCheckin(pending: Task[], completed: Task[]) {
@@ -267,7 +258,7 @@ export function CheckinExperience() {
     if (pending.length === 0) {
       setScreen('done')
       setSpeaking(true)
-      speak('Muy bien! Completaste todas tus tareas. Ya podés disfrutar tu tiempo libre.', () => setSpeaking(false))
+      speak('¡Muy bien! Completaste todas tus tareas.', () => setSpeaking(false))
     } else {
       setScreen('pending')
     }
@@ -277,10 +268,8 @@ export function CheckinExperience() {
     if (requesting || requestedIds.has(item.id)) return
     setRequesting(item.id)
     const supabase = createClient()
-    await supabase.from('reward_redemptions').insert({
-      child_id: child!.id,
-      reward_id: item.id,
-    })
+    await supabase.from('reward_redemptions').insert({ child_id: child!.id, reward_id: item.id })
+    setRedemptions(prev => [...prev, { id: Date.now().toString(), status: 'pending', rewards_catalog: { title: item.title, cost_points: item.cost_points } }])
     setRequestedIds(prev => new Set([...prev, item.id]))
     setRequesting(null)
   }
@@ -293,81 +282,9 @@ export function CheckinExperience() {
   return (
     <div className="min-h-screen flex flex-col items-center" style={{ background: 'var(--bg)', maxWidth: 400, margin: '0 auto' }}>
 
-      {/* ── Welcome ── */}
-      {screen === 'welcome' && (
-        <div className="flex flex-col items-center justify-center flex-1 p-6 text-center gap-6">
-          <div className="relative">
-            <OrbCanvas size={160} speaking={speaking} color={child.avatar_color} />
-            {speaking && (
-              <>
-                {[1,2,3].map(i => (
-                  <div key={i} className="absolute rounded-full border" style={{
-                    inset: `${-i * 14}px`,
-                    borderColor: `rgba(124,58,237,${0.4 - i * 0.1})`,
-                    animation: `sring 1.4s ease-out ${(i-1) * 0.38}s infinite`,
-                  }} />
-                ))}
-              </>
-            )}
-          </div>
-
-          <div>
-            <h1 className="text-3xl font-bold mb-1">Hola, {child.name} 👋</h1>
-            <div className="flex items-center justify-center gap-2 mt-1">
-              <span className="text-sm font-semibold px-3 py-1 rounded-full" style={{ background: 'rgba(124,58,237,0.12)', color: 'var(--ac)' }}>
-                ⭐ {balance} puntos
-              </span>
-            </div>
-            <p className="text-base mt-2" style={{ color: 'var(--t2)' }}>
-              Vamos a repasar tus tareas antes del tiempo libre
-            </p>
-          </div>
-
-          {child.reward_text && (
-            <div className="w-full p-4 rounded-2xl text-left" style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.25)' }}>
-              <p className="text-xs font-semibold uppercase tracking-widest mb-1" style={{ color: 'var(--ac)' }}>🎁 Recompensa de esta semana</p>
-              <p className="text-sm font-medium" style={{ color: 'var(--t1)' }}>{child.reward_text}</p>
-            </div>
-          )}
-
-          <div className="w-full p-4 rounded-2xl text-left" style={{ background: 'var(--surf)', border: '1px solid var(--bdr)' }}>
-            <p className="text-xs font-semibold uppercase tracking-widest mb-2" style={{ color: 'var(--t3)' }}>Tareas de hoy</p>
-            {tasks.map(t => (
-              <div key={t.id} className="flex items-center gap-2 py-1.5 text-sm">
-                <div className="w-4 h-4 rounded-full flex-shrink-0" style={{
-                  background: t.completed_today ? 'rgba(34,197,94,0.2)' : 'var(--surf2)',
-                  border: `1px solid ${t.completed_today ? '#22c55e' : 'var(--bdr2)'}`,
-                }} />
-                <span className="flex-1" style={{ color: t.completed_today ? 'var(--t2)' : 'var(--t1)' }}>{t.title}</span>
-                <span className="text-xs" style={{ color: 'var(--ac)' }}>+{t.points}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="flex flex-col gap-3 w-full">
-            <button
-              onClick={startCheckin}
-              className="w-full py-4 rounded-2xl font-bold text-lg"
-              style={{ background: 'var(--ac)', color: '#fff', boxShadow: '0 0 32px rgba(124,58,237,0.35)' }}
-            >
-              Empezar →
-            </button>
-            {catalog.length > 0 && (
-              <button
-                onClick={() => { stopSpeech(); setScreen('store') }}
-                className="w-full py-3 rounded-2xl font-semibold text-sm"
-                style={{ background: 'var(--surf)', border: '1px solid var(--bdr2)', color: 'var(--t2)' }}
-              >
-                🏆 Ver tienda de recompensas
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* ── Check-in ── */}
       {screen === 'checkin' && (
-        <div className="flex flex-col items-center w-full flex-1 pb-24">
+        <div className="flex flex-col items-center w-full flex-1 pb-16">
           <div className="w-full px-6 pt-6 pb-2">
             <div className="flex justify-between text-xs mb-2" style={{ color: 'var(--t3)' }}>
               <span>Tarea {Math.min(taskIndex + 1, totalTasks)} de {totalTasks}</span>
@@ -392,11 +309,7 @@ export function CheckinExperience() {
           {speaking && (
             <div className="flex items-center gap-1 mb-4" style={{ height: 24 }}>
               {[6,12,20,14,8,18,10].map((h, i) => (
-                <div key={i} className="w-[3px] rounded-full" style={{
-                  height: h,
-                  background: 'var(--ac)',
-                  animation: `wavebar 0.9s ease-in-out ${i * 0.1}s infinite`,
-                }} />
+                <div key={i} className="w-[3px] rounded-full" style={{ height: h, background: 'var(--ac)', animation: `wavebar 0.9s ease-in-out ${i * 0.1}s infinite` }} />
               ))}
             </div>
           )}
@@ -405,10 +318,7 @@ export function CheckinExperience() {
             {thinking && (
               <div className="flex justify-center gap-1.5 py-4">
                 {[0,1,2].map(i => (
-                  <div key={i} className="w-1.5 h-1.5 rounded-full" style={{
-                    background: 'var(--t3)',
-                    animation: `tdot 1.1s ease-in-out ${i * 0.16}s infinite`,
-                  }} />
+                  <div key={i} className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--t3)', animation: `tdot 1.1s ease-in-out ${i * 0.16}s infinite` }} />
                 ))}
               </div>
             )}
@@ -422,7 +332,7 @@ export function CheckinExperience() {
               {chips.map((chip, i) => (
                 <button
                   key={chip}
-                  onClick={() => respondTask(chip, pendingTasks, completedTasks)}
+                  onClick={() => respondTask(chip)}
                   className="w-full py-3.5 rounded-2xl text-sm font-semibold transition-transform active:scale-95"
                   style={{
                     background: i === 0 ? 'rgba(34,197,94,0.12)' : i === 1 ? 'rgba(234,179,8,0.12)' : 'rgba(239,68,68,0.1)',
@@ -435,19 +345,6 @@ export function CheckinExperience() {
               ))}
             </div>
           )}
-
-          <div className="fixed bottom-6 left-0 right-0 px-6 max-w-[400px] mx-auto">
-            <div className="flex gap-2">
-              <input
-                value={answer}
-                onChange={e => setAnswer(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && answer.trim()) { respondTask(answer.trim(), pendingTasks, completedTasks); setAnswer('') } }}
-                className="flex-1 rounded-xl px-4 py-3 text-sm outline-none"
-                style={{ background: 'var(--surf)', border: '1px solid var(--bdr2)', color: 'var(--t1)' }}
-                placeholder="O escribí tu respuesta…"
-              />
-            </div>
-          </div>
         </div>
       )}
 
@@ -477,9 +374,7 @@ export function CheckinExperience() {
           </div>
 
           <div className="w-full rounded-2xl p-4" style={{ background: 'var(--surf)', border: '1px solid rgba(34,197,94,0.3)' }}>
-            <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--t3)' }}>
-              Completaste hoy
-            </p>
+            <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--t3)' }}>Completaste hoy</p>
             {completedTasks.map(t => (
               <div key={t.id} className="flex items-center gap-2 py-1.5 text-sm">
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -494,11 +389,7 @@ export function CheckinExperience() {
 
           <div className="flex flex-col gap-3 w-full">
             {catalog.length > 0 && (
-              <button
-                onClick={() => setScreen('store')}
-                className="w-full py-3 rounded-2xl font-semibold text-sm"
-                style={{ background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.25)', color: 'var(--ac)' }}
-              >
+              <button onClick={() => setScreen('store')} className="w-full py-3 rounded-2xl font-semibold text-sm" style={{ background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.25)', color: 'var(--ac)' }}>
                 🏆 Canjear en la tienda · {balance} pts
               </button>
             )}
@@ -517,12 +408,10 @@ export function CheckinExperience() {
       {screen === 'pending' && (
         <div className="flex flex-col items-center justify-center flex-1 p-6 text-center gap-6">
           <OrbCanvas size={130} speaking={false} color={child.avatar_color} />
-
           <div>
             <h1 className="text-2xl font-bold mb-2">Casi, {child.name}</h1>
             <p style={{ color: 'var(--t2)' }}>Todavía te falta completar:</p>
           </div>
-
           <div className="w-full rounded-2xl p-4" style={{ background: 'var(--surf)', border: '1px solid rgba(239,68,68,0.25)' }}>
             {pendingTasks.map(t => (
               <div key={t.id} className="flex items-center gap-2 py-1.5 text-sm">
@@ -531,11 +420,7 @@ export function CheckinExperience() {
               </div>
             ))}
           </div>
-
-          <p className="italic text-sm" style={{ color: 'var(--t2)' }}>
-            "¡Yo sé que podés! Volvé cuando termines."
-          </p>
-
+          <p className="italic text-sm" style={{ color: 'var(--t2)' }}>"¡Yo sé que podés! Volvé cuando termines."</p>
           <button
             onClick={() => router.push(`/c/${child.pin}`)}
             className="w-full py-4 rounded-2xl font-bold"
@@ -550,55 +435,30 @@ export function CheckinExperience() {
       {screen === 'store' && (
         <div className="flex flex-col w-full flex-1 p-6 gap-5">
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => setScreen(completedTasks.length > 0 && pendingTasks.length === 0 ? 'done' : 'welcome')}
-              className="text-sm"
-              style={{ color: 'var(--t3)' }}
-            >
-              ←
-            </button>
-            <div className="flex-1">
-              <h1 className="text-xl font-bold">Tienda de recompensas</h1>
-            </div>
-            <span className="text-sm font-semibold px-3 py-1 rounded-full" style={{ background: 'rgba(124,58,237,0.12)', color: 'var(--ac)' }}>
-              ⭐ {balance} pts
-            </span>
+            <button onClick={() => setScreen(completedTasks.length > 0 && pendingTasks.length === 0 ? 'done' : 'checkin')} className="text-sm" style={{ color: 'var(--t3)' }}>←</button>
+            <h1 className="flex-1 text-xl font-bold">Tienda</h1>
+            <span className="text-sm font-semibold px-3 py-1 rounded-full" style={{ background: 'rgba(124,58,237,0.12)', color: 'var(--ac)' }}>⭐ {balance} pts</span>
           </div>
 
+          {/* Catalog */}
           {catalog.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center">
-              <p className="text-sm" style={{ color: 'var(--t3)' }}>La tienda está vacía por ahora.</p>
-            </div>
+            <p className="text-sm text-center py-8" style={{ color: 'var(--t3)' }}>La tienda está vacía por ahora.</p>
           ) : (
             <div className="space-y-3">
               {catalog.map(item => {
                 const canAfford = balance >= item.cost_points
                 const requested = requestedIds.has(item.id)
                 return (
-                  <div
-                    key={item.id}
-                    className="flex items-center gap-4 rounded-2xl p-4"
-                    style={{
-                      background: 'var(--surf)',
-                      border: `1px solid ${requested ? 'rgba(124,58,237,0.4)' : 'var(--bdr)'}`,
-                      opacity: !canAfford && !requested ? 0.55 : 1,
-                    }}
-                  >
+                  <div key={item.id} className="flex items-center gap-4 rounded-2xl p-4" style={{ background: 'var(--surf)', border: `1px solid ${requested ? 'rgba(124,58,237,0.4)' : 'var(--bdr)'}`, opacity: !canAfford && !requested ? 0.55 : 1 }}>
                     <div className="flex-1">
                       <p className="text-sm font-medium">{item.title}</p>
-                      <p className="text-xs font-semibold mt-0.5" style={{ color: 'var(--ac)' }}>
-                        {item.cost_points} pts
-                      </p>
+                      <p className="text-xs font-semibold mt-0.5" style={{ color: 'var(--ac)' }}>{item.cost_points} pts</p>
                     </div>
                     <button
                       onClick={() => requestReward(item)}
                       disabled={!canAfford || requested || requesting === item.id}
-                      className="px-4 py-2 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
-                      style={{
-                        background: requested ? 'rgba(34,197,94,0.15)' : canAfford ? 'var(--ac)' : 'var(--surf2)',
-                        color: requested ? '#22c55e' : canAfford ? '#fff' : 'var(--t3)',
-                        border: requested ? '1px solid rgba(34,197,94,0.3)' : 'none',
-                      }}
+                      className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50"
+                      style={{ background: requested ? 'rgba(34,197,94,0.15)' : canAfford ? 'var(--ac)' : 'var(--surf2)', color: requested ? '#22c55e' : canAfford ? '#fff' : 'var(--t3)', border: requested ? '1px solid rgba(34,197,94,0.3)' : 'none' }}
                     >
                       {requested ? '✓ Pedido' : requesting === item.id ? '…' : canAfford ? 'Pedir' : 'Faltan pts'}
                     </button>
@@ -608,25 +468,30 @@ export function CheckinExperience() {
             </div>
           )}
 
-          <p className="text-xs text-center" style={{ color: 'var(--t3)' }}>
-            Tu papá/mamá aprueba los canjes
-          </p>
+          {/* Approved redemptions */}
+          {redemptions.filter(r => r.status === 'approved').length > 0 && (
+            <div className="mt-2">
+              <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--t3)' }}>Canjes aprobados</p>
+              <div className="space-y-2">
+                {redemptions.filter(r => r.status === 'approved').map(r => (
+                  <div key={r.id} className="flex items-center gap-3 rounded-xl px-4 py-3" style={{ background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.2)' }}>
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="8" fill="rgba(34,197,94,0.2)"/><polyline points="4 8 7 11 12 5" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    <p className="text-sm flex-1">{r.rewards_catalog?.title}</p>
+                    <p className="text-xs font-semibold" style={{ color: '#22c55e' }}>Aprobado</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <p className="text-xs text-center" style={{ color: 'var(--t3)' }}>Tu papá/mamá aprueba los canjes</p>
         </div>
       )}
 
       <style>{`
-        @keyframes sring {
-          0%   { opacity: 0.7; transform: scale(0.88); }
-          100% { opacity: 0;   transform: scale(1.55); }
-        }
-        @keyframes wavebar {
-          0%, 100% { transform: scaleY(0.4); opacity: 0.6; }
-          50%       { transform: scaleY(1);   opacity: 1; }
-        }
-        @keyframes tdot {
-          0%, 80%, 100% { transform: translateY(0);    opacity: 0.35; }
-          40%           { transform: translateY(-6px); opacity: 1;    }
-        }
+        @keyframes sring { 0% { opacity: 0.7; transform: scale(0.88); } 100% { opacity: 0; transform: scale(1.55); } }
+        @keyframes wavebar { 0%, 100% { transform: scaleY(0.4); opacity: 0.6; } 50% { transform: scaleY(1); opacity: 1; } }
+        @keyframes tdot { 0%, 80%, 100% { transform: translateY(0); opacity: 0.35; } 40% { transform: translateY(-6px); opacity: 1; } }
       `}</style>
     </div>
   )

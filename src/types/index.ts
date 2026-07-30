@@ -11,6 +11,7 @@ export type Child = {
   name: string
   avatar_color: string
   reward_text: string | null
+  child_pin: string
   created_at: string
 }
 
