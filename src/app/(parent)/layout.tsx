@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
+import { ThemeToggle } from '@/components/ThemeToggle'
 
 export default async function ParentLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
@@ -17,6 +18,7 @@ export default async function ParentLayout({ children }: { children: React.React
             <span className="font-bold text-base tracking-tight">Listo</span>
           </Link>
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <Link href="/help" className="text-xs px-3 py-1.5 rounded-lg transition-colors hover:opacity-70" style={{ color: 'var(--t3)', border: '1px solid var(--bdr)' }}>
               Ayuda
             </Link>
