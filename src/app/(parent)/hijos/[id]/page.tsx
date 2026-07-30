@@ -12,19 +12,17 @@ export default async function HijoPage({ params }: { params: Promise<{ id: strin
 
   const today = new Date().toISOString().split('T')[0]
 
-  const { data: child } = await supabase
-    .from('children')
-    .select(`
-      *,
-      families!inner(parent_id),
-      tasks (
-        *,
-        task_completions(id, date, completed_at)
-      )
-    `)
-    .eq('id', id)
-    .eq('families.parent_id', user.id)
-    .single()
+  const [{ data: child }, { data: catalogData }, { data: redemptionsData }, { data: balanceData }] = await Promise.all([
+    supabase
+      .from('children')
+      .select(`*, families!inner(parent_id), tasks(*, task_completions(id, date, completed_at))`)
+      .eq('id', id)
+      .eq('families.parent_id', user.id)
+      .single(),
+    supabase.from('rewards_catalog').select('*').eq('child_id', id).eq('active', true).order('cost_points'),
+    supabase.from('reward_redemptions').select('*, rewards_catalog(*)').eq('child_id', id).order('created_at', { ascending: false }).limit(20),
+    supabase.rpc('get_child_balance', { p_child_id: id }),
+  ])
 
   if (!child) notFound()
 
@@ -33,5 +31,15 @@ export default async function HijoPage({ params }: { params: Promise<{ id: strin
     completed_today: t.task_completions?.some((c: any) => c.date === today) ?? false,
   }))
 
-  return <TaskManager child={{ ...child, tasks }} />
+  return (
+    <TaskManager
+      child={{
+        ...child,
+        tasks,
+        balance: balanceData ?? 0,
+        catalog: catalogData ?? [],
+        redemptions: redemptionsData ?? [],
+      }}
+    />
+  )
 }

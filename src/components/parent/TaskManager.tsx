@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
+import { RewardsCatalog } from './RewardsCatalog'
+import type { RewardCatalogItem, RewardRedemption } from '@/types'
 
 const DAY_LABELS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
 
@@ -21,6 +23,7 @@ type Task = {
   title: string
   recurrence: string
   days: number[] | null
+  points: number
   active: boolean
   completed_today: boolean
 }
@@ -31,6 +34,9 @@ type Child = {
   avatar_color: string
   reward_text: string | null
   tasks: Task[]
+  balance: number
+  catalog: RewardCatalogItem[]
+  redemptions: RewardRedemption[]
 }
 
 export function TaskManager({ child }: { child: Child }) {
@@ -41,6 +47,7 @@ export function TaskManager({ child }: { child: Child }) {
   const [newTitle, setNewTitle] = useState('')
   const [newRecurrence, setNewRecurrence] = useState<'daily' | 'weekdays' | 'weekend' | 'custom'>('daily')
   const [newDays, setNewDays] = useState<number[]>([])
+  const [newPoints, setNewPoints] = useState(10)
   const [adding, setAdding] = useState(false)
   const [showForm, setShowForm] = useState(false)
 
@@ -61,7 +68,7 @@ export function TaskManager({ child }: { child: Child }) {
     const supabase = createClient()
     const { data, error } = await supabase
       .from('tasks')
-      .insert({ child_id: child.id, title: newTitle.trim(), recurrence: newRecurrence, days: newRecurrence === 'custom' ? newDays : null })
+      .insert({ child_id: child.id, title: newTitle.trim(), recurrence: newRecurrence, days: newRecurrence === 'custom' ? newDays : null, points: newPoints })
       .select()
       .single()
     if (!error && data) {
@@ -69,6 +76,7 @@ export function TaskManager({ child }: { child: Child }) {
       setNewTitle('')
       setNewRecurrence('daily')
       setNewDays([])
+      setNewPoints(10)
       setShowForm(false)
     }
     setAdding(false)
@@ -97,9 +105,13 @@ export function TaskManager({ child }: { child: Child }) {
         >
           {child.name[0].toUpperCase()}
         </div>
-        <div>
+        <div className="flex-1">
           <h1 className="font-bold">{child.name}</h1>
           <p className="text-xs" style={{ color: 'var(--t3)' }}>{completed}/{activeTasks.length} hoy</p>
+        </div>
+        <div className="text-right">
+          <p className="text-lg font-bold" style={{ color: 'var(--ac)' }}>{child.balance}</p>
+          <p className="text-xs" style={{ color: 'var(--t3)' }}>puntos</p>
         </div>
       </div>
 
@@ -172,11 +184,9 @@ export function TaskManager({ child }: { child: Child }) {
 
             <div className="flex-1 min-w-0">
               <p className="text-sm">{task.title}</p>
-              {task.recurrence !== 'daily' && (
-                <p className="text-xs mt-0.5" style={{ color: 'var(--t3)' }}>
-                  {recurrenceLabel(task.recurrence, task.days)}
-                </p>
-              )}
+              <p className="text-xs mt-0.5" style={{ color: 'var(--t3)' }}>
+                {task.points} pts{task.recurrence !== 'daily' ? ` · ${recurrenceLabel(task.recurrence, task.days)}` : ''}
+              </p>
             </div>
 
             {/* Toggle active */}
@@ -210,6 +220,16 @@ export function TaskManager({ child }: { child: Child }) {
             placeholder="Nombre de la tarea"
             autoFocus
           />
+          {/* Points */}
+          <div className="flex items-center gap-3">
+            <label className="text-xs font-medium flex-1" style={{ color: 'var(--t2)' }}>Puntos al completar</label>
+            <input
+              type="number" min={1} max={999} value={newPoints}
+              onChange={e => setNewPoints(Number(e.target.value))}
+              className="w-20 rounded-lg px-3 py-2 text-sm outline-none text-center"
+              style={{ background: 'var(--surf)', border: '1px solid var(--bdr2)', color: 'var(--ac)' }}
+            />
+          </div>
           {/* Recurrence selector */}
           <div className="flex gap-1.5 flex-wrap">
             {([
@@ -282,6 +302,12 @@ export function TaskManager({ child }: { child: Child }) {
           + Agregar tarea
         </button>
       )}
+
+      <RewardsCatalog
+        childId={child.id}
+        initialCatalog={child.catalog}
+        initialRedemptions={child.redemptions}
+      />
     </div>
   )
 }

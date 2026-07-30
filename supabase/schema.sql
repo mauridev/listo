@@ -21,13 +21,14 @@ CREATE TABLE children (
   created_at   timestamptz DEFAULT now()
 );
 
--- Tasks: template tasks assigned to a child
+-- Tasks: template tasks assigned to a child (points = reward per completion)
 CREATE TABLE tasks (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   child_id    uuid REFERENCES children(id) ON DELETE CASCADE NOT NULL,
   title       text NOT NULL,
   recurrence  text NOT NULL DEFAULT 'daily' CHECK (recurrence IN ('daily', 'weekdays', 'weekend', 'custom')),
-  days        smallint[] DEFAULT NULL,  -- used when recurrence='custom': [0=Dom,1=Lun,...,6=Sab]
+  days        smallint[] DEFAULT NULL,
+  points      smallint NOT NULL DEFAULT 10,
   active      boolean NOT NULL DEFAULT true,
   created_at  timestamptz DEFAULT now()
 );
@@ -112,8 +113,57 @@ LANGUAGE sql SECURITY DEFINER AS $$
   WHERE f.family_pin = UPPER(pin);
 $$;
 
+-- Points ledger
+CREATE TABLE point_transactions (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  child_id   uuid REFERENCES children(id) ON DELETE CASCADE NOT NULL,
+  delta      integer NOT NULL,
+  reason     text NOT NULL,
+  created_at timestamptz DEFAULT now()
+);
+
+-- Rewards catalog (parent defines, kid redeems)
+CREATE TABLE rewards_catalog (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  child_id    uuid REFERENCES children(id) ON DELETE CASCADE NOT NULL,
+  title       text NOT NULL,
+  cost_points integer NOT NULL DEFAULT 50,
+  active      boolean NOT NULL DEFAULT true,
+  created_at  timestamptz DEFAULT now()
+);
+
+-- Redemption requests (kid requests, parent approves)
+CREATE TABLE reward_redemptions (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  child_id   uuid REFERENCES children(id) ON DELETE CASCADE NOT NULL,
+  reward_id  uuid REFERENCES rewards_catalog(id) NOT NULL,
+  status     text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+  created_at timestamptz DEFAULT now()
+);
+
+ALTER TABLE point_transactions  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rewards_catalog     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reward_redemptions  ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "parent_own_points"      ON point_transactions FOR ALL USING (child_id IN (SELECT c.id FROM children c JOIN families f ON c.family_id = f.id WHERE f.parent_id = auth.uid()));
+CREATE POLICY "parent_own_catalog"     ON rewards_catalog    FOR ALL USING (child_id IN (SELECT c.id FROM children c JOIN families f ON c.family_id = f.id WHERE f.parent_id = auth.uid()));
+CREATE POLICY "parent_own_redemptions" ON reward_redemptions FOR ALL USING (child_id IN (SELECT c.id FROM children c JOIN families f ON c.family_id = f.id WHERE f.parent_id = auth.uid()));
+
+CREATE POLICY "anon_read_points"       ON point_transactions FOR SELECT USING (true);
+CREATE POLICY "anon_insert_points"     ON point_transactions FOR INSERT WITH CHECK (true);
+CREATE POLICY "anon_read_catalog"      ON rewards_catalog    FOR SELECT USING (true);
+CREATE POLICY "anon_read_redemptions"  ON reward_redemptions FOR SELECT USING (true);
+CREATE POLICY "anon_insert_redemption" ON reward_redemptions FOR INSERT WITH CHECK (true);
+
+CREATE OR REPLACE FUNCTION get_child_balance(p_child_id uuid)
+RETURNS integer LANGUAGE sql SECURITY DEFINER AS $$
+  SELECT COALESCE(SUM(delta), 0)::integer FROM point_transactions WHERE child_id = p_child_id;
+$$;
+
 -- ===================================================
--- REALTIME — enable on task_completions for parent dashboard
+-- REALTIME
 -- ===================================================
 
 ALTER PUBLICATION supabase_realtime ADD TABLE task_completions;
+ALTER PUBLICATION supabase_realtime ADD TABLE point_transactions;
+ALTER PUBLICATION supabase_realtime ADD TABLE reward_redemptions;

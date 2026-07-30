@@ -20,8 +20,27 @@ export type Task = {
   title: string
   recurrence: 'daily' | 'weekdays' | 'weekend' | 'custom'
   days: number[] | null
+  points: number
   active: boolean
   created_at: string
+}
+
+export type RewardCatalogItem = {
+  id: string
+  child_id: string
+  title: string
+  cost_points: number
+  active: boolean
+  created_at: string
+}
+
+export type RewardRedemption = {
+  id: string
+  child_id: string
+  reward_id: string
+  status: 'pending' | 'approved' | 'rejected'
+  created_at: string
+  rewards_catalog?: RewardCatalogItem
 }
 
 export type TaskCompletion = {

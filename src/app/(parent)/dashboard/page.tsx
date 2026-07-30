@@ -19,25 +19,35 @@ async function getFamily(userId: string) {
   if (!family) return null
 
   const today = new Date().toISOString().split('T')[0]
+  const dayOfWeek = new Date().getDay()
+
+  function appliesToday(recurrence: string, days: number[] | null): boolean {
+    if (recurrence === 'daily') return true
+    if (recurrence === 'weekdays') return dayOfWeek >= 1 && dayOfWeek <= 5
+    if (recurrence === 'weekend') return dayOfWeek === 0 || dayOfWeek === 6
+    if (recurrence === 'custom') return (days ?? []).includes(dayOfWeek)
+    return true
+  }
 
   const { data: children } = await supabase
     .from('children')
     .select(`
       *,
-      tasks!inner (
+      tasks (
         *,
         task_completions (id, date, completed_at)
       )
     `)
     .eq('family_id', family.id)
-    .eq('tasks.active', true)
     .order('created_at', { ascending: true })
 
   const enriched: ChildWithProgress[] = (children ?? []).map(child => {
-    const tasks = (child.tasks ?? []).map((t: any) => {
-      const completedToday = t.task_completions?.some((c: any) => c.date === today) ?? false
-      return { ...t, completed_today: completedToday }
-    })
+    const tasks = (child.tasks ?? [])
+      .filter((t: any) => t.active && appliesToday(t.recurrence, t.days))
+      .map((t: any) => {
+        const completedToday = t.task_completions?.some((c: any) => c.date === today) ?? false
+        return { ...t, completed_today: completedToday }
+      })
     const completed = tasks.filter((t: any) => t.completed_today).length
     return {
       ...child,
