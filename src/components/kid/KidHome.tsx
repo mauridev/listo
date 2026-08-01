@@ -100,8 +100,11 @@ function PlanetScene({ color }: { color: string }) {
           float diff = max(dot(vN, sun), 0.0);
           col = col * (0.10 + 0.90 * diff);
 
-          vec3  half = normalize(sun + vec3(0.0, 0.0, 1.0));
-          float spec = pow(max(dot(vN, half), 0.0), 28.0);
+          // ojo: 'half' es palabra reservada en GLSL — usar ese nombre hacía que
+          // el fragment shader no compilara y el planeta se viera como un blob
+          // liso, sin continentes ni especular (bug desde ce526ad)
+          vec3  halfVec = normalize(sun + vec3(0.0, 0.0, 1.0));
+          float spec = pow(max(dot(vN, halfVec), 0.0), 28.0);
           col += vec3(0.35) * spec * (1.0 - continent) * 0.65;
 
           float rim = pow(1.0 - clamp(dot(vN, vec3(0.0, 0.0, 1.0)), 0.0, 1.0), 2.4);
