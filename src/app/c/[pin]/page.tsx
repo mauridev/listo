@@ -1,57 +1,58 @@
-import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import { KidHome } from '@/components/kid/KidHome'
+import { resolvePin, loadKidState } from '@/lib/kid-data'
+import { localDateStr } from '@/lib/recurrence'
 
 export const dynamic = 'force-dynamic'
 
-function taskAppliesToday(t: { recurrence: string; days: number[] | null }): boolean {
-  const day = new Date().getDay()
-  if (t.recurrence === 'daily') return true
-  if (t.recurrence === 'weekdays') return day >= 1 && day <= 5
-  if (t.recurrence === 'weekend') return day === 0 || day === 6
-  if (t.recurrence === 'custom') return (t.days ?? []).includes(day)
-  return true
-}
-
-export default async function KidPinPage({ params }: { params: Promise<{ pin: string }> }) {
+/**
+ * Entrada del hijo por PIN.
+ *
+ * Spec 0008: todo se resuelve del lado servidor con la secret key. El rol
+ * `anon` ya no puede leer `tasks` ni nada del flujo del hijo, así que no hay
+ * forma de sacar esta data sin pasar por acá (donde contamos intentos por IP).
+ */
+export default async function KidPinPage({
+  params,
+}: {
+  params: Promise<{ pin: string }>
+}) {
   const { pin } = await params
-  const supabase = await createClient()
+  const result = await resolvePin(pin)
 
-  const { data, error } = await supabase.rpc('get_child_by_pin', { pin: pin.toUpperCase() })
-  if (error || !data || data.length === 0) notFound()
+  if (result.status === 'rate_limited') {
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center p-6 text-center gap-3"
+        style={{ background: 'var(--bg)' }}
+      >
+        <p className="text-4xl">⏳</p>
+        <h1 className="text-xl font-bold">Demasiados intentos</h1>
+        <p className="text-sm max-w-xs" style={{ color: 'var(--t2)' }}>
+          Esperá unos minutos y volvé a probar. Si no te acordás tu código,
+          pedíselo a tu papá o mamá.
+        </p>
+      </div>
+    )
+  }
 
-  const row = data[0]
-  const today = new Date().toISOString().split('T')[0]
+  if (result.status !== 'ok') notFound()
 
-  const { data: tasksData } = await supabase
-    .from('tasks')
-    .select('*, task_completions(id, date)')
-    .eq('child_id', row.child_id)
-    .eq('active', true)
-
-  const tasks = (tasksData ?? [])
-    .filter((t: any) => taskAppliesToday(t))
-    .map((t: any) => ({
-      id: t.id,
-      title: t.title,
-      recurrence: t.recurrence,
-      days: t.days ?? null,
-      points: t.points ?? 10,
-      completed_today: t.task_completions?.some((tc: any) => tc.date === today) ?? false,
-      completion_dates: (t.task_completions ?? []).map((tc: any) => tc.date as string),
-    }))
+  const { child } = result
+  const today = localDateStr()
+  const state = await loadKidState(child.id, today)
 
   return (
     <KidHome
       child={{
-        id: row.child_id,
-        name: row.child_name,
-        avatar_color: row.avatar_color,
-        reward_text: row.reward_text ?? null,
-        familyId: row.family_id,
+        id: child.id,
+        name: child.name,
+        avatar_color: child.avatar_color,
+        reward_text: child.reward_text,
+        familyId: child.family_id,
         pin: pin.toUpperCase(),
       }}
-      tasks={tasks}
+      tasks={state.tasks}
     />
   )
 }

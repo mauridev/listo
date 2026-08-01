@@ -1,21 +1,18 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
+import { generatePin } from '@/lib/pin'
+import { safeNext } from '@/lib/safe-redirect'
 
 const supabaseKey =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
   ''
 
-function generatePin(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-  return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
-}
-
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const code = searchParams.get('code')
-  const next = searchParams.get('next') ?? '/dashboard'
+  const next = safeNext(searchParams.get('next'))
 
   if (!code) {
     return NextResponse.redirect(new URL('/login?error=no_code', request.url))
@@ -43,21 +40,23 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL('/login?error=auth_failed', request.url))
   }
 
-  // Create family row if it doesn't exist yet
+  // Crear la familia si todavía no existe. PIN con CSPRNG (spec 0008 H3).
   const { data: existing } = await supabase
     .from('families')
     .select('id')
     .eq('parent_id', user.id)
-    .single()
+    .maybeSingle()
 
   if (!existing) {
-    let pin = generatePin()
-    for (let i = 0; i < 5; i++) {
+    for (let attempt = 0; attempt < 5; attempt++) {
       const { error: familyError } = await supabase
         .from('families')
-        .insert({ parent_id: user.id, family_pin: pin })
+        .insert({ parent_id: user.id, family_pin: generatePin() })
       if (!familyError) break
-      pin = generatePin()
+      if (familyError.code !== '23505') {
+        console.error('[auth] no se pudo crear la familia:', familyError.message)
+        break
+      }
     }
   }
 
