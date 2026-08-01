@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { resolveRedemption } from '@/app/(parent)/actions'
 import type { RewardCatalogItem, RewardRedemption } from '@/types'
 
 export function RewardsCatalog({
@@ -19,6 +20,8 @@ export function RewardsCatalog({
   const [newTitle, setNewTitle] = useState('')
   const [newCost, setNewCost] = useState(50)
   const [saving, setSaving] = useState(false)
+  const [resolving, setResolving] = useState<string | null>(null)
+  const [error, setError] = useState('')
 
   async function addReward(e: React.FormEvent) {
     e.preventDefault()
@@ -44,24 +47,32 @@ export function RewardsCatalog({
     setCatalog(prev => prev.filter(r => r.id !== id))
   }
 
-  async function approveRedemption(id: string) {
-    const redemption = redemptions.find(r => r.id === id)
-    const supabase = createClient()
-    await supabase.from('reward_redemptions').update({ status: 'approved' }).eq('id', id)
-    if (redemption?.rewards_catalog) {
-      await supabase.from('point_transactions').insert({
-        child_id: redemption.child_id,
-        delta: -redemption.rewards_catalog.cost_points,
-        reason: `Canje: ${redemption.rewards_catalog.title}`,
-      })
-    }
-    setRedemptions(prev => prev.map(r => r.id === id ? { ...r, status: 'approved' as const } : r))
-  }
+  /**
+   * Spec 0008 (M5): antes esto hacía el UPDATE y el descuento desde el cliente,
+   * con el costo tomado del estado local — así que un doble click descontaba dos
+   * veces. Ahora lo resuelve una RPC que solo actúa si el canje estaba
+   * 'pending' y lee el costo de la DB.
+   */
+  async function resolve(id: string, approve: boolean) {
+    if (resolving) return
+    setResolving(id)
+    setError('')
 
-  async function rejectRedemption(id: string) {
-    const supabase = createClient()
-    await supabase.from('reward_redemptions').update({ status: 'rejected' }).eq('id', id)
-    setRedemptions(prev => prev.map(r => r.id === id ? { ...r, status: 'rejected' as const } : r))
+    const result = await resolveRedemption(id, approve)
+
+    if (result.status === 'ok') {
+      const status = result.resolution
+      setRedemptions(prev => prev.map(r => (r.id === id ? { ...r, status } : r)))
+    } else if (result.status === 'already_resolved') {
+      // Otra pestaña lo resolvió: sacarlo de pendientes sin inventar el estado
+      setRedemptions(prev => prev.filter(r => r.id !== id))
+    } else if (result.status === 'insufficient_points') {
+      setError(`No alcanzan los puntos: tiene ${result.balance}, necesita ${result.needed}.`)
+    } else {
+      setError('No se pudo resolver el canje. Probá de nuevo.')
+    }
+
+    setResolving(null)
   }
 
   const pending = redemptions.filter(r => r.status === 'pending')
@@ -74,6 +85,7 @@ export function RewardsCatalog({
           <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--ac)' }}>
             🔔 Canjes pendientes
           </p>
+          {error && <p className="text-sm mb-2" style={{ color: '#ef4444' }}>{error}</p>}
           <div className="space-y-2">
             {pending.map(r => (
               <div key={r.id} className="flex items-center gap-3 rounded-xl px-4 py-3" style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.25)' }}>
@@ -81,10 +93,10 @@ export function RewardsCatalog({
                   <p className="text-sm font-medium">{r.rewards_catalog?.title}</p>
                   <p className="text-xs" style={{ color: 'var(--t3)' }}>{r.rewards_catalog?.cost_points} pts</p>
                 </div>
-                <button onClick={() => approveRedemption(r.id)} className="text-xs px-3 py-1.5 rounded-lg font-semibold" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}>
-                  ✓ Dar
+                <button onClick={() => resolve(r.id, true)} disabled={resolving === r.id} className="text-xs px-3 py-1.5 rounded-lg font-semibold disabled:opacity-40" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}>
+                  {resolving === r.id ? '…' : '✓ Dar'}
                 </button>
-                <button onClick={() => rejectRedemption(r.id)} className="text-xs px-3 py-1.5 rounded-lg" style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)' }}>
+                <button onClick={() => resolve(r.id, false)} disabled={resolving === r.id} className="text-xs px-3 py-1.5 rounded-lg disabled:opacity-40" style={{ background: 'rgba(239,68,68,0.1)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.2)' }}>
                   ✕
                 </button>
               </div>

@@ -2,13 +2,9 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { ensureFamily } from '@/app/(auth)/actions'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-
-function generatePin(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-  return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
-}
 
 export default function RegistroPage() {
   const router = useRouter()
@@ -37,14 +33,13 @@ export default function RegistroPage() {
     }
 
     if (session) {
-      // Email confirmation disabled — session is immediately active, create family now
-      let pin = generatePin()
-      for (let i = 0; i < 5; i++) {
-        const { error: familyError } = await supabase
-          .from('families')
-          .insert({ parent_id: user.id, family_pin: pin })
-        if (!familyError) break
-        pin = generatePin()
+      // Sin confirmación de email: la sesión ya está activa. La familia (y su
+      // PIN con CSPRNG) la crea el servidor — spec 0008 H3.
+      const result = await ensureFamily()
+      if (!result.ok) {
+        setError(result.message ?? 'No se pudo crear la familia')
+        setLoading(false)
+        return
       }
       router.push('/dashboard')
       router.refresh()
@@ -82,11 +77,11 @@ export default function RegistroPage() {
           <div>
             <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--t2)' }}>Contraseña</label>
             <input
-              type="password" required minLength={6} value={password}
+              type="password" required minLength={8} value={password}
               onChange={e => setPassword(e.target.value)}
               className="w-full rounded-xl px-4 py-3 text-sm outline-none"
               style={{ background: 'var(--surf)', border: '1px solid var(--bdr2)', color: 'var(--t1)' }}
-              placeholder="Mínimo 6 caracteres"
+              placeholder="Mínimo 8 caracteres"
             />
           </div>
 

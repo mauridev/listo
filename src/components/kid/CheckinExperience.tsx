@@ -2,30 +2,17 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import * as THREE from 'three'
+import { completeTask, requestRedemption } from '@/app/c/actions'
+import { localDateStr } from '@/lib/recurrence'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type KidChild = { id: string; name: string; avatar_color: string; familyId: string; pin: string; reward_text: string | null }
+type KidChild = { id: string; name: string; avatar_color: string; pin: string; reward_text: string | null }
 type Task = { id: string; title: string; recurrence: string; days: number[] | null; points: number; completed_today: boolean }
 type CatalogItem = { id: string; title: string; cost_points: number }
-type Redemption = { id: string; status: 'pending' | 'approved' | 'rejected'; rewards_catalog?: { title: string; cost_points: number } }
+type Redemption = { id: string; status: 'pending' | 'approved' | 'rejected'; rewards_catalog?: { title: string; cost_points: number } | null }
 type Screen = 'checkin' | 'done' | 'pending' | 'store'
-
-function localDateStr(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-function taskAppliesToday(task: { recurrence: string; days: number[] | null }): boolean {
-  const day = new Date().getDay()
-  if (task.recurrence === 'daily') return true
-  if (task.recurrence === 'weekdays') return day >= 1 && day <= 5
-  if (task.recurrence === 'weekend') return day === 0 || day === 6
-  if (task.recurrence === 'custom') return task.days?.includes(day) ?? false
-  return true
-}
 
 // ── Shared noise GLSL ──────────────────────────────────────────────────────
 
@@ -292,13 +279,26 @@ function stopSpeech() { speechCancelled = true; window.speechSynthesis?.cancel()
 
 // ── Main Component ─────────────────────────────────────────────────────────
 
-export function CheckinExperience() {
+export function CheckinExperience({
+  child,
+  initialTasks,
+  initialBalance,
+  initialCatalog,
+  initialRedemptions,
+}: {
+  child: KidChild
+  initialTasks: Task[]
+  initialBalance: number
+  initialCatalog: CatalogItem[]
+  initialRedemptions: Redemption[]
+}) {
   const router = useRouter()
-  const [child, setChild] = useState<KidChild | null>(null)
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [balance, setBalance] = useState(0)
-  const [catalog, setCatalog] = useState<CatalogItem[]>([])
-  const [redemptions, setRedemptions] = useState<Redemption[]>([])
+  // Spec 0008: la data llega del servidor ya scopeada al child_id de la cookie
+  // firmada. Este componente no consulta más la DB por su cuenta.
+  const tasks = initialTasks
+  const catalog = initialCatalog
+  const [balance, setBalance] = useState(initialBalance)
+  const [redemptions, setRedemptions] = useState<Redemption[]>(initialRedemptions)
   const [screen, setScreen] = useState<Screen>('checkin')
   const [taskIndex, setTaskIndex] = useState(0)
   const [speaking, setSpeaking] = useState(false)
@@ -309,42 +309,16 @@ export function CheckinExperience() {
   const [completedTasks, setCompletedTasks] = useState<Task[]>([])
   const [requesting, setRequesting] = useState<string | null>(null)
   const [requestedIds, setRequestedIds] = useState<Set<string>>(new Set())
+  const [storeError, setStoreError] = useState('')
 
   const pendingResponse = useRef<{ task: Task; idx: number; pending: Task[]; completed: Task[] } | null>(null)
 
+  // Arranca el guion del check-in una sola vez, al montar.
   useEffect(() => {
-    const stored = sessionStorage.getItem('listo_child')
-    if (!stored) { router.push('/'); return }
-    const c: KidChild = JSON.parse(stored)
-    setChild(c)
-
-    async function fetchAll() {
-      const supabase = createClient()
-      const today = localDateStr()
-
-      const [{ data: tasksData }, { data: balanceData }, { data: catalogData }, { data: redemptionsData }] = await Promise.all([
-        supabase.from('tasks').select('*, task_completions(id, date)').eq('child_id', c.id).eq('active', true),
-        supabase.rpc('get_child_balance', { p_child_id: c.id }),
-        supabase.from('rewards_catalog').select('id, title, cost_points').eq('child_id', c.id).eq('active', true).order('cost_points'),
-        supabase.from('reward_redemptions').select('*, rewards_catalog(title, cost_points)').eq('child_id', c.id).order('created_at', { ascending: false }).limit(10),
-      ])
-
-      const todayTasks: Task[] = (tasksData ?? [])
-        .filter((t: any) => taskAppliesToday(t))
-        .map((t: any) => ({
-          id: t.id, title: t.title, recurrence: t.recurrence, days: t.days ?? null,
-          points: t.points ?? 10,
-          completed_today: t.task_completions?.some((tc: any) => tc.date === today) ?? false,
-        }))
-
-      setTasks(todayTasks)
-      setBalance(balanceData ?? 0)
-      setCatalog(catalogData ?? [])
-      setRedemptions(redemptionsData ?? [])
-      startCheckinWith(todayTasks, c)
-    }
-    fetchAll()
-  }, [router])
+    startCheckinWith(initialTasks, child)
+    return () => stopSpeech()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function startCheckinWith(loadedTasks: Task[], c: KidChild) {
     stopSpeech()
@@ -397,11 +371,18 @@ export function CheckinExperience() {
     const didComplete = response.includes('✅') || response.toLowerCase().startsWith('sí') || response.toLowerCase().startsWith('si')
     let newPending = pending, newCompleted = completed
     if (didComplete) {
-      const supabase = createClient()
-      const today = localDateStr()
-      await supabase.from('task_completions').upsert({ task_id: task.id, child_id: child!.id, date: today }, { onConflict: 'task_id,date' })
-      await supabase.from('point_transactions').insert({ child_id: child!.id, delta: task.points, reason: task.title })
-      setBalance(prev => prev + task.points)
+      // Spec 0008 (C1): el servidor decide cuántos puntos vale la tarea leyendo
+      // tasks.points. Acá ya no se manda ningún delta, y el saldo que se muestra
+      // es el que devuelve la DB, no una suma optimista del cliente.
+      const result = await completeTask(task.id, localDateStr())
+
+      if (result.status === 'ok' || result.status === 'already_done') {
+        setBalance(result.balance)
+      } else if (result.status === 'no_session') {
+        router.push(`/c/${child.pin}`)
+        return
+      }
+
       newCompleted = [...completed, task]
       setCompletedTasks(newCompleted)
     } else {
@@ -425,14 +406,29 @@ export function CheckinExperience() {
   async function requestReward(item: CatalogItem) {
     if (requesting || requestedIds.has(item.id)) return
     setRequesting(item.id)
-    const supabase = createClient()
-    await supabase.from('reward_redemptions').insert({ child_id: child!.id, reward_id: item.id })
-    setRedemptions(prev => [...prev, { id: Date.now().toString(), status: 'pending', rewards_catalog: { title: item.title, cost_points: item.cost_points } }])
-    setRequestedIds(prev => new Set([...prev, item.id]))
+
+    // Spec 0008 (H2): el saldo lo valida el servidor y el canje nace 'pending'.
+    // El chequeo de `canAfford` de abajo es solo UX.
+    const result = await requestRedemption(item.id)
+
+    if (result.status === 'ok' || result.status === 'already_requested') {
+      setRedemptions(prev => [
+        ...prev,
+        { id: `pending-${item.id}`, status: 'pending', rewards_catalog: { title: item.title, cost_points: item.cost_points } },
+      ])
+      setRequestedIds(prev => new Set([...prev, item.id]))
+    } else if (result.status === 'insufficient_points') {
+      setBalance(result.balance)
+      setStoreError('Te faltan puntos para ese premio.')
+    } else if (result.status === 'no_session') {
+      router.push(`/c/${child.pin}`)
+      return
+    } else {
+      setStoreError('No pudimos pedir el premio. Probá de nuevo.')
+    }
+
     setRequesting(null)
   }
-
-  if (!child) return null
 
   const totalTasks = tasks.length
   const pct = totalTasks > 0 ? (taskIndex / totalTasks) * 100 : 0
@@ -641,6 +637,10 @@ export function CheckinExperience() {
                 ))}
               </div>
             </div>
+          )}
+
+          {storeError && (
+            <p className="text-sm text-center" style={{ color: '#ef4444' }}>{storeError}</p>
           )}
 
           <p className="text-xs text-center" style={{ color: 'var(--t3)' }}>Tu papá/mamá aprueba los canjes</p>

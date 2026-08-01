@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { createChild } from '@/app/(parent)/actions'
 import Link from 'next/link'
 
 const COLORS = ['#7C3AED', '#2563EB', '#16A34A', '#DC2626', '#D97706', '#0891B2', '#BE185D']
@@ -14,37 +14,23 @@ export default function NuevoHijoPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  function generatePin(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-    return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
-  }
-
+  // Spec 0008 (H3): el PIN lo genera el servidor con un CSPRNG. Antes se
+  // generaba acá con Math.random(), que es predecible.
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!name.trim()) return
     setLoading(true)
+    setError('')
 
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { router.push('/login'); return }
+    const result = await createChild(name, color)
 
-    const { data: family } = await supabase
-      .from('families')
-      .select('id')
-      .eq('parent_id', user.id)
-      .single()
+    if (result.status === 'ok') {
+      router.push(`/hijos/${result.childId}`)
+      return
+    }
 
-    if (!family) { setError('Error cargando la familia'); setLoading(false); return }
-
-    const { data: child, error: childError } = await supabase
-      .from('children')
-      .insert({ family_id: family.id, name: name.trim(), avatar_color: color, child_pin: generatePin() })
-      .select()
-      .single()
-
-    if (childError || !child) { setError(childError?.message ?? 'Error'); setLoading(false); return }
-
-    router.push(`/hijos/${child.id}`)
+    setError(result.message)
+    setLoading(false)
   }
 
   return (

@@ -1,8 +1,10 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import * as THREE from 'three'
+import { startKidSession } from '@/app/c/actions'
+import { localDateStr } from '@/lib/recurrence'
 
 type KidChild = {
   id: string
@@ -19,11 +21,6 @@ type Task = {
   points: number
   completion_dates?: string[]
   completed_today: boolean
-}
-
-function localDateStr(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 // ── Shared noise GLSL ──────────────────────────────────────────────────────
@@ -229,9 +226,30 @@ export function KidHome({ child, tasks: rawTasks }: { child: KidChild; tasks: Ta
   const allDone = tasks.length > 0 && tasks.every(t => t.completed_today)
   const completedCount = tasks.filter(t => t.completed_today).length
 
-  function start() {
-    sessionStorage.setItem('listo_child', JSON.stringify(child))
-    router.push(`/c/${child.pin}/checkin`)
+  const [starting, setStarting] = useState(false)
+  const [startError, setStartError] = useState('')
+
+  // Spec 0008 (H1): la sesión del hijo la abre el servidor en una cookie
+  // firmada. Antes se guardaba el child_id en sessionStorage, donde cualquiera
+  // lo podía editar para operar sobre otro chico.
+  async function start() {
+    if (starting) return
+    setStarting(true)
+    setStartError('')
+
+    const result = await startKidSession(child.pin)
+
+    if (result.status === 'ok') {
+      router.push(`/c/${child.pin}/checkin`)
+      return
+    }
+
+    setStarting(false)
+    setStartError(
+      result.status === 'rate_limited'
+        ? 'Demasiados intentos. Esperá unos minutos.'
+        : 'No pudimos abrir tu check-in. Probá de nuevo.'
+    )
   }
 
   return (
@@ -316,19 +334,27 @@ export function KidHome({ child, tasks: rawTasks }: { child: KidChild; tasks: Ta
         ) : allDone ? (
           <button
             onClick={start}
-            className="w-full py-4 rounded-2xl font-bold text-base"
+            disabled={starting}
+            className="w-full py-4 rounded-2xl font-bold text-base disabled:opacity-60"
             style={{ background: 'linear-gradient(135deg, #22c55e, #16a34a)', color: '#fff', boxShadow: '0 0 32px rgba(34,197,94,0.3)' }}
           >
-            Ver mis puntos →
+            {starting ? 'Abriendo…' : 'Ver mis puntos →'}
           </button>
         ) : (
           <button
             onClick={start}
-            className="w-full py-4 rounded-2xl font-bold text-base"
+            disabled={starting}
+            className="w-full py-4 rounded-2xl font-bold text-base disabled:opacity-60"
             style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', color: '#fff', boxShadow: '0 0 40px rgba(124,58,237,0.4)' }}
           >
-            Empezar check-in →
+            {starting ? 'Abriendo…' : 'Empezar check-in →'}
           </button>
+        )}
+
+        {startError && (
+          <p className="text-sm text-center mt-3" style={{ color: '#fca5a5' }}>
+            {startError}
+          </p>
         )}
       </div>
     </div>

@@ -141,7 +141,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* Real-time updater (client component) */}
-      <RealtimeDashboard familyId={family.id} />
+      <RealtimeDashboard familyId={family.id} childIds={children.map(c => c.id)} />
     </div>
   )
 }
