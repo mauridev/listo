@@ -12,6 +12,17 @@ import { taskAppliesOn } from '@/lib/recurrence'
  * Nunca por un id que mandó el cliente.
  */
 
+/**
+ * ⚠️ Esto depende de Vercel. Vercel **reemplaza** `x-forwarded-for` con la IP
+ * real del cliente, así que tomar el primer valor es correcto acá — verificado
+ * el 2026-08-01 mandando un `X-Forwarded-For` falso a producción: se registró
+ * la IP real, no la inventada.
+ *
+ * Si alguna vez se migra a un proxy que **agrega** en vez de reemplazar (nginx,
+ * Cloudflare mal configurado), el primer valor pasa a ser el que manda el
+ * atacante y el rate limiting del PIN se vuelve esquivable rotando IPs falsas.
+ * En ese caso hay que tomar el último valor, o el header de confianza del proxy.
+ */
 export async function clientIp(): Promise<string> {
   const h = await headers()
   const fwd = h.get('x-forwarded-for')
