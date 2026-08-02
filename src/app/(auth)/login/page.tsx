@@ -1,9 +1,15 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import GoogleButton from '@/components/ui/GoogleButton'
+
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  no_code: 'No se pudo completar el login con Google. Probá de nuevo.',
+  auth_failed: 'No se pudo verificar la cuenta de Google. Probá de nuevo o entrá con tu contraseña.',
+}
 
 export default function LoginPage() {
   const router = useRouter()
@@ -11,11 +17,18 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
 
   // Kid PIN flow
   const [showPin, setShowPin] = useState(false)
   const [pin, setPin] = useState('')
   const pinRef = useRef<HTMLInputElement>(null)
+
+  // Errores que vuelven redirigidos desde /auth/callback (spec 0012 R3)
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get('error')
+    if (code && OAUTH_ERROR_MESSAGES[code]) setError(OAUTH_ERROR_MESSAGES[code])
+  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -26,6 +39,17 @@ export default function LoginPage() {
     if (error) { setError(error.message); setLoading(false); return }
     router.push('/dashboard')
     router.refresh()
+  }
+
+  async function handleGoogle() {
+    setError('')
+    setGoogleLoading(true)
+    const supabase = createClient()
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: `${window.location.origin}/auth/callback?next=/dashboard` },
+    })
+    if (error) { setError(error.message); setGoogleLoading(false) }
   }
 
   function handlePinSubmit(e: React.FormEvent) {
@@ -86,6 +110,14 @@ export default function LoginPage() {
           <>
             <h1 className="text-2xl font-bold text-center mb-1">Bienvenido de vuelta</h1>
             <p className="text-center text-sm mb-8" style={{ color: 'var(--t2)' }}>Panel de familia</p>
+
+            <GoogleButton onClick={handleGoogle} loading={googleLoading} />
+
+            <div className="flex items-center gap-3 my-5">
+              <div className="flex-1 h-px" style={{ background: 'var(--bdr)' }} />
+              <span className="text-xs" style={{ color: 'var(--t3)' }}>o con tu email</span>
+              <div className="flex-1 h-px" style={{ background: 'var(--bdr)' }} />
+            </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
