@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { ensureFamily } from '@/app/(auth)/actions'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import GoogleButton from '@/components/ui/GoogleButton'
 
 export default function RegistroPage() {
   const router = useRouter()
@@ -12,6 +13,18 @@ export default function RegistroPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
+
+  async function handleGoogle() {
+    setError('')
+    setGoogleLoading(true)
+    const supabase = createClient()
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: `${window.location.origin}/auth/callback?next=/dashboard` },
+    })
+    if (error) { setError(error.message); setGoogleLoading(false) }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -62,6 +75,14 @@ export default function RegistroPage() {
         <p className="text-center text-sm mb-8" style={{ color: 'var(--t2)' }}>
           Tu cuenta de padre/madre
         </p>
+
+        <GoogleButton onClick={handleGoogle} loading={googleLoading} label="Registrarme con Google" />
+
+        <div className="flex items-center gap-3 my-5">
+          <div className="flex-1 h-px" style={{ background: 'var(--bdr)' }} />
+          <span className="text-xs" style={{ color: 'var(--t3)' }}>o con tu email</span>
+          <div className="flex-1 h-px" style={{ background: 'var(--bdr)' }} />
+        </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
