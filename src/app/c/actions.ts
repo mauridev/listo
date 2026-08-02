@@ -17,9 +17,30 @@ import { isValidPinFormat } from '@/lib/pin'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+/**
+ * Sesión válida = firma buena, no expirada, **y el PIN sigue siendo el actual**.
+ *
+ * Ese último chequeo importa: rotar el PIN es la forma de cortarle el acceso a
+ * alguien que se lo enteró. Sin esto, la cookie seguía sirviendo hasta 8 horas
+ * después de la rotación, o sea que rotar no revocaba nada — justo lo que la
+ * rotación tiene que lograr.
+ */
 async function currentSession() {
   const store = await cookies()
-  return verifyKidSession(store.get(KID_COOKIE)?.value)
+  const session = verifyKidSession(store.get(KID_COOKIE)?.value)
+  if (!session) return null
+
+  const supabase = createAdminClient()
+  const { data } = await supabase
+    .from('children')
+    .select('child_pin')
+    .eq('id', session.cid)
+    .maybeSingle()
+
+  // Hijo borrado, o PIN rotado después de emitir esta cookie
+  if (!data || data.child_pin !== session.pin) return null
+
+  return session
 }
 
 export type StartResult =

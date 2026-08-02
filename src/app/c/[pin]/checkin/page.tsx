@@ -37,11 +37,15 @@ export default async function CheckinPage({
   const supabase = createAdminClient()
   const { data: child } = await supabase
     .from('children')
-    .select('id, name, avatar_color, reward_text')
+    .select('id, name, avatar_color, reward_text, child_pin')
     .eq('id', session.cid)
-    .single()
+    .maybeSingle()
 
-  if (!child) redirect(`/c/${pin.toUpperCase()}`)
+  // El PIN pudo haberse rotado después de emitir la cookie: si rotar no
+  // invalidara la sesión, rotar no serviría para cortarle el acceso a nadie.
+  if (!child || child.child_pin !== session.pin) {
+    redirect(`/c/${pin.toUpperCase()}`)
+  }
 
   return (
     <CheckinExperience
