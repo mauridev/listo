@@ -3,15 +3,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import * as THREE from 'three'
-import { completeTask, requestRedemption } from '@/app/c/actions'
+import { completeTask } from '@/app/c/actions'
 import { localDateStr } from '@/lib/recurrence'
+import { KidStore, useKidStore, type CatalogItem, type Redemption } from './KidStore'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
 type KidChild = { id: string; name: string; avatar_color: string; pin: string; reward_text: string | null }
 type Task = { id: string; title: string; recurrence: string; days: number[] | null; points: number; completed_today: boolean }
-type CatalogItem = { id: string; title: string; cost_points: number }
-type Redemption = { id: string; status: 'pending' | 'approved' | 'rejected'; rewards_catalog?: { title: string; cost_points: number } | null }
 type Screen = 'checkin' | 'done' | 'pending' | 'store'
 
 // ── Shared noise GLSL ──────────────────────────────────────────────────────
@@ -297,8 +296,10 @@ export function CheckinExperience({
   // firmada. Este componente no consulta más la DB por su cuenta.
   const tasks = initialTasks
   const catalog = initialCatalog
-  const [balance, setBalance] = useState(initialBalance)
-  const [redemptions, setRedemptions] = useState<Redemption[]>(initialRedemptions)
+  // Spec 0011 (R5): la tienda es un componente aparte. El estado se monta acá
+  // arriba para que el "✓ Pedido" sobreviva ir y volver entre done y store.
+  const store = useKidStore({ pin: child.pin, initialBalance, initialRedemptions })
+  const balance = store.balance
   const [screen, setScreen] = useState<Screen>('checkin')
   const [taskIndex, setTaskIndex] = useState(0)
   const [speaking, setSpeaking] = useState(false)
@@ -307,9 +308,6 @@ export function CheckinExperience({
   const [chips, setChips] = useState<string[]>([])
   const [pendingTasks, setPendingTasks] = useState<Task[]>([])
   const [completedTasks, setCompletedTasks] = useState<Task[]>([])
-  const [requesting, setRequesting] = useState<string | null>(null)
-  const [requestedIds, setRequestedIds] = useState<Set<string>>(new Set())
-  const [storeError, setStoreError] = useState('')
 
   const pendingResponse = useRef<{ task: Task; idx: number; pending: Task[]; completed: Task[] } | null>(null)
 
@@ -377,7 +375,7 @@ export function CheckinExperience({
       const result = await completeTask(task.id, localDateStr())
 
       if (result.status === 'ok' || result.status === 'already_done') {
-        setBalance(result.balance)
+        store.setBalance(result.balance)
       } else if (result.status === 'no_session') {
         router.push(`/c/${child.pin}`)
         return
@@ -394,6 +392,14 @@ export function CheckinExperience({
 
   function finishCheckin(pending: Task[], completed: Task[]) {
     setSpeaking(false); setThinking(false)
+
+    // Las tareas que ya venían hechas se acumulan en el array local de askTask,
+    // pero nunca pasaban al estado: el chico que entraba con todo cumplido veía
+    // "Completaste hoy" vacío, y volver de la tienda lo mandaba a un check-in
+    // sin tareas — otro callejón. Encontrado verificando la spec 0011.
+    setPendingTasks(pending)
+    setCompletedTasks(completed)
+
     if (pending.length === 0) {
       setScreen('done')
       setSpeaking(true)
@@ -401,33 +407,6 @@ export function CheckinExperience({
     } else {
       setScreen('pending')
     }
-  }
-
-  async function requestReward(item: CatalogItem) {
-    if (requesting || requestedIds.has(item.id)) return
-    setRequesting(item.id)
-
-    // Spec 0008 (H2): el saldo lo valida el servidor y el canje nace 'pending'.
-    // El chequeo de `canAfford` de abajo es solo UX.
-    const result = await requestRedemption(item.id)
-
-    if (result.status === 'ok' || result.status === 'already_requested') {
-      setRedemptions(prev => [
-        ...prev,
-        { id: `pending-${item.id}`, status: 'pending', rewards_catalog: { title: item.title, cost_points: item.cost_points } },
-      ])
-      setRequestedIds(prev => new Set([...prev, item.id]))
-    } else if (result.status === 'insufficient_points') {
-      setBalance(result.balance)
-      setStoreError('Te faltan puntos para ese premio.')
-    } else if (result.status === 'no_session') {
-      router.push(`/c/${child.pin}`)
-      return
-    } else {
-      setStoreError('No pudimos pedir el premio. Probá de nuevo.')
-    }
-
-    setRequesting(null)
   }
 
   const totalTasks = tasks.length
@@ -590,61 +569,14 @@ export function CheckinExperience({
 
       {/* ── Store ── */}
       {screen === 'store' && (
-        <div className="flex flex-col w-full flex-1 p-6 gap-5">
-          <div className="flex items-center gap-3">
-            <button onClick={() => setScreen(completedTasks.length > 0 && pendingTasks.length === 0 ? 'done' : 'checkin')} className="text-sm" style={{ color: 'var(--t3)' }}>←</button>
-            <h1 className="flex-1 text-xl font-bold">Tienda</h1>
-            <span className="text-sm font-semibold px-3 py-1 rounded-full" style={{ background: 'rgba(124,58,237,0.12)', color: 'var(--ac)' }}>⭐ {balance} pts</span>
-          </div>
-
-          {catalog.length === 0 ? (
-            <p className="text-sm text-center py-8" style={{ color: 'var(--t3)' }}>La tienda está vacía por ahora.</p>
-          ) : (
-            <div className="space-y-3">
-              {catalog.map(item => {
-                const canAfford = balance >= item.cost_points
-                const requested = requestedIds.has(item.id)
-                return (
-                  <div key={item.id} className="flex items-center gap-4 rounded-2xl p-4" style={{ background: 'var(--surf)', border: `1px solid ${requested ? 'rgba(124,58,237,0.4)' : 'var(--bdr)'}`, opacity: !canAfford && !requested ? 0.55 : 1 }}>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium">{item.title}</p>
-                      <p className="text-xs font-semibold mt-0.5" style={{ color: 'var(--ac)' }}>{item.cost_points} pts</p>
-                    </div>
-                    <button
-                      onClick={() => requestReward(item)}
-                      disabled={!canAfford || requested || requesting === item.id}
-                      className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50"
-                      style={{ background: requested ? 'rgba(34,197,94,0.15)' : canAfford ? 'var(--ac)' : 'var(--surf2)', color: requested ? '#22c55e' : canAfford ? '#fff' : 'var(--t3)', border: requested ? '1px solid rgba(34,197,94,0.3)' : 'none' }}
-                    >
-                      {requested ? '✓ Pedido' : requesting === item.id ? '…' : canAfford ? 'Pedir' : 'Faltan pts'}
-                    </button>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
-          {redemptions.filter(r => r.status === 'approved').length > 0 && (
-            <div className="mt-2">
-              <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: 'var(--t3)' }}>Canjes aprobados</p>
-              <div className="space-y-2">
-                {redemptions.filter(r => r.status === 'approved').map(r => (
-                  <div key={r.id} className="flex items-center gap-3 rounded-xl px-4 py-3" style={{ background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.2)' }}>
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="8" fill="rgba(34,197,94,0.2)"/><polyline points="4 8 7 11 12 5" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                    <p className="text-sm flex-1">{r.rewards_catalog?.title}</p>
-                    <p className="text-xs font-semibold" style={{ color: '#22c55e' }}>Aprobado</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {storeError && (
-            <p className="text-sm text-center" style={{ color: '#ef4444' }}>{storeError}</p>
-          )}
-
-          <p className="text-xs text-center" style={{ color: 'var(--t3)' }}>Tu papá/mamá aprueba los canjes</p>
-        </div>
+        <KidStore
+          store={store}
+          catalog={catalog}
+          // A la tienda solo se llega desde 'done', así que volver es volver ahí.
+          // Antes esto dependía de `completedTasks`, que podía estar vacío y
+          // dejaba al chico en un check-in sin tareas.
+          onBack={() => setScreen('done')}
+        />
       )}
 
       <style>{`

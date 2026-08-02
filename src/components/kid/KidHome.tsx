@@ -218,7 +218,17 @@ function PlanetScene({ color }: { color: string }) {
 
 // ── KidHome ────────────────────────────────────────────────────────────────
 
-export function KidHome({ child, tasks: rawTasks }: { child: KidChild; tasks: Task[] }) {
+export function KidHome({
+  child,
+  tasks: rawTasks,
+  balance,
+  hasStore,
+}: {
+  child: KidChild
+  tasks: Task[]
+  balance: number
+  hasStore: boolean
+}) {
   const router = useRouter()
   // Recompute completed_today with local browser date (fixes UTC vs local timezone bug)
   const today = localDateStr()
@@ -229,29 +239,36 @@ export function KidHome({ child, tasks: rawTasks }: { child: KidChild; tasks: Ta
   const allDone = tasks.length > 0 && tasks.every(t => t.completed_today)
   const completedCount = tasks.filter(t => t.completed_today).length
 
-  const [starting, setStarting] = useState(false)
+  const [opening, setOpening] = useState<'checkin' | 'tienda' | null>(null)
   const [startError, setStartError] = useState('')
+
+  const storeLabel = hasStore ? 'Ver mis puntos y premios' : 'Ver mis puntos'
 
   // Spec 0008 (H1): la sesión del hijo la abre el servidor en una cookie
   // firmada. Antes se guardaba el child_id en sessionStorage, donde cualquiera
   // lo podía editar para operar sobre otro chico.
-  async function start() {
-    if (starting) return
-    setStarting(true)
+  //
+  // Spec 0011: la misma sesión sirve para entrar directo a la tienda, sin
+  // pasar por el check-in.
+  async function enter(target: 'checkin' | 'tienda') {
+    if (opening) return
+    setOpening(target)
     setStartError('')
 
     const result = await startKidSession(child.pin)
 
     if (result.status === 'ok') {
-      router.push(`/c/${child.pin}/checkin`)
+      router.push(`/c/${child.pin}/${target}`)
       return
     }
 
-    setStarting(false)
+    setOpening(null)
     setStartError(
       result.status === 'rate_limited'
         ? 'Demasiados intentos. Esperá unos minutos.'
-        : 'No pudimos abrir tu check-in. Probá de nuevo.'
+        : target === 'tienda'
+          ? 'No pudimos abrir tu tienda. Probá de nuevo.'
+          : 'No pudimos abrir tu check-in. Probá de nuevo.'
     )
   }
 
@@ -280,11 +297,21 @@ export function KidHome({ child, tasks: rawTasks }: { child: KidChild; tasks: Ta
 
         <div className="mb-5">
           <p className="text-sm font-medium mb-1" style={{ color: 'rgba(167,139,250,0.8)' }}>
-            {allDone ? '¡Todo cumplido hoy!' : 'Antes de tu tiempo libre'}
+            {tasks.length === 0 ? '¡Hoy es todo tuyo!' : allDone ? '¡Todo cumplido hoy!' : 'Antes de tu tiempo libre'}
           </p>
-          <h1 className="text-4xl font-bold tracking-tight">
-            Hola, {child.name}
-          </h1>
+          <div className="flex items-end gap-3">
+            <h1 className="text-4xl font-bold tracking-tight flex-1">
+              Hola, {child.name}
+            </h1>
+            {/* Spec 0011 (R4): el día sin tareas esto es lo único que tiene para
+                mirar. No lo escondemos detrás de un tap. */}
+            <span
+              className="text-sm font-semibold px-3 py-1 rounded-full whitespace-nowrap mb-1"
+              style={{ background: 'rgba(124,58,237,0.18)', border: '1px solid rgba(124,58,237,0.35)', color: 'rgba(216,180,254,0.95)' }}
+            >
+              ⭐ {balance}
+            </span>
+          </div>
         </div>
 
         {child.reward_text && (
@@ -330,28 +357,61 @@ export function KidHome({ child, tasks: rawTasks }: { child: KidChild; tasks: Ta
           </div>
         )}
 
+        {/* Spec 0011 (R1): sin tareas, esta pantalla mostraba una frase gris y
+            ningún botón. Un chico de 6 a 14 años quedaba en un callejón justo
+            el día libre, que es cuando más ganas tiene de gastar lo que juntó. */}
         {tasks.length === 0 ? (
-          <div className="text-center py-4" style={{ color: 'rgba(255,255,255,0.4)' }}>
-            <p className="text-sm">No tenés tareas para hoy.</p>
-          </div>
-        ) : allDone ? (
-          <button
-            onClick={start}
-            disabled={starting}
-            className="w-full py-4 rounded-2xl font-bold text-base disabled:opacity-60"
-            style={{ background: 'linear-gradient(135deg, #22c55e, #16a34a)', color: '#fff', boxShadow: '0 0 32px rgba(34,197,94,0.3)' }}
-          >
-            {starting ? 'Abriendo…' : 'Ver mis puntos →'}
-          </button>
+          <>
+            <div className="mb-5 px-4 py-5 rounded-2xl text-center" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <p className="text-3xl mb-2">🛸</p>
+              <p className="text-sm font-medium" style={{ color: 'rgba(255,255,255,0.9)' }}>
+                Hoy no tenés tareas. ¡Disfrutá!
+              </p>
+              <p className="text-xs mt-1" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                Tus puntos te esperan cuando quieras.
+              </p>
+            </div>
+            <button
+              onClick={() => enter('tienda')}
+              disabled={opening !== null}
+              className="w-full py-4 rounded-2xl font-bold text-base disabled:opacity-60"
+              style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', color: '#fff', boxShadow: '0 0 40px rgba(124,58,237,0.4)' }}
+            >
+              {opening === 'tienda' ? 'Abriendo…' : `${storeLabel} →`}
+            </button>
+          </>
         ) : (
-          <button
-            onClick={start}
-            disabled={starting}
-            className="w-full py-4 rounded-2xl font-bold text-base disabled:opacity-60"
-            style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', color: '#fff', boxShadow: '0 0 40px rgba(124,58,237,0.4)' }}
-          >
-            {starting ? 'Abriendo…' : 'Empezar check-in →'}
-          </button>
+          <>
+            {allDone ? (
+              <button
+                onClick={() => enter('checkin')}
+                disabled={opening !== null}
+                className="w-full py-4 rounded-2xl font-bold text-base disabled:opacity-60"
+                style={{ background: 'linear-gradient(135deg, #22c55e, #16a34a)', color: '#fff', boxShadow: '0 0 32px rgba(34,197,94,0.3)' }}
+              >
+                {opening === 'checkin' ? 'Abriendo…' : 'Ver mis puntos →'}
+              </button>
+            ) : (
+              <button
+                onClick={() => enter('checkin')}
+                disabled={opening !== null}
+                className="w-full py-4 rounded-2xl font-bold text-base disabled:opacity-60"
+                style={{ background: 'linear-gradient(135deg, #7c3aed, #5b21b6)', color: '#fff', boxShadow: '0 0 40px rgba(124,58,237,0.4)' }}
+              >
+                {opening === 'checkin' ? 'Abriendo…' : 'Empezar check-in →'}
+              </button>
+            )}
+            {/* Spec 0011 (R6): la tienda también se alcanza en días con tareas,
+                pero el check-in sigue siendo la acción protagonista. */}
+            <button
+              onClick={() => enter('tienda')}
+              disabled={opening !== null}
+              className="w-full mt-3 py-2 text-sm font-medium disabled:opacity-60"
+              style={{ background: 'transparent', color: 'rgba(255,255,255,0.5)' }}
+            >
+              {opening === 'tienda' ? 'Abriendo…' : storeLabel}
+            </button>
+          </>
         )}
 
         {startError && (

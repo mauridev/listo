@@ -53,6 +53,8 @@ export default async function KidPinPage({
         pin: pin.toUpperCase(),
       }}
       tasks={state.tasks}
+      balance={state.balance}
+      hasStore={state.catalog.length > 0}
     />
   )
 }
